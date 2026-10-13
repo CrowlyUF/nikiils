@@ -20,6 +20,24 @@ public final class PlayerStats {
     final Flag noSlow = new Flag();
     final Flag scaffold = new Flag();
     final Flag aimAssist = new Flag();
+    final Flag fakeLag = new Flag();
+    final Flag backtrack = new Flag();
+
+    // FakeLag
+    boolean lagHasPos;
+    double lagX;
+    double lagY;
+    double lagZ;
+    int frozenTicks;
+    int freezeTraffic;
+    double preFreezeSpeed;
+    /** Congelamentos suspeitos: {tempo, em combate (1/0)}. */
+    private final ArrayDeque<long[]> lagEvents = new ArrayDeque<long[]>();
+
+    // Backtrack / Reach
+    private final ArrayDeque<Double> reaches = new ArrayDeque<Double>();
+    private final ArrayDeque<Long> backtrackHits = new ArrayDeque<Long>();
+    private final ArrayDeque<Long> farHits = new ArrayDeque<Long>();
 
     /** Blocos colocados: {tempo, pitch, embaixo (1/0)}. */
     private final ArrayDeque<double[]> placed = new ArrayDeque<double[]>();
@@ -220,5 +238,64 @@ public final class PlayerStats {
             snaps.removeFirst();
         }
         return snaps.size();
+    }
+
+    /** Registra um congelamento suspeito e retorna quantos houve nos últimos 15 s. */
+    int lagEvent(long now, boolean combat) {
+        lagEvents.addLast(new long[]{now, combat ? 1 : 0});
+        while (!lagEvents.isEmpty() && now - lagEvents.peekFirst()[0] > 15_000L) {
+            lagEvents.removeFirst();
+        }
+        return lagEvents.size();
+    }
+
+    int combatLagEvents(long now) {
+        int n = 0;
+        for (long[] e : lagEvents) {
+            if (e[1] == 1 && now - e[0] <= 15_000L) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    void clearLagEvents() {
+        lagEvents.clear();
+    }
+
+    void addReach(double reach) {
+        reaches.addLast(reach);
+        while (reaches.size() > 20) {
+            reaches.removeFirst();
+        }
+    }
+
+    /** {média, máximo} do reach nos últimos hits, ou null se houver menos de 3. */
+    public double[] reachStats() {
+        if (reaches.size() < 3) {
+            return null;
+        }
+        double sum = 0, max = 0;
+        for (double r : reaches) {
+            sum += r;
+            max = Math.max(max, r);
+        }
+        return new double[]{sum / reaches.size(), max};
+    }
+
+    int backtrackHit(long now) {
+        return count(backtrackHits, now, 20_000L);
+    }
+
+    int farHit(long now) {
+        return count(farHits, now, 20_000L);
+    }
+
+    private static int count(ArrayDeque<Long> q, long now, long window) {
+        q.addLast(now);
+        while (!q.isEmpty() && now - q.peekFirst() > window) {
+            q.removeFirst();
+        }
+        return q.size();
     }
 }

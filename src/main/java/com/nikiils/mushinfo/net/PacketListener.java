@@ -1,12 +1,14 @@
 package com.nikiils.mushinfo.net;
 
-import com.nikiils.mushinfo.check.PlayerChecks;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
+import com.nikiils.mushinfo.check.PlayerChecks;
 import net.minecraft.network.play.server.S0BPacketAnimation;
+import net.minecraft.network.play.server.S14PacketEntity;
+import net.minecraft.network.play.server.S18PacketEntityTeleport;
 import net.minecraft.network.play.server.S22PacketMultiBlockChange;
 import net.minecraft.network.play.server.S23PacketBlockChange;
 import net.minecraft.util.BlockPos;
@@ -43,7 +45,9 @@ public class PacketListener {
                     PlayerChecks.INSTANCE.onSwing(packet.getEntityID(), System.currentTimeMillis());
                 }
             }
-            if (msg instanceof S23PacketBlockChange) {
+            if (msg instanceof S14PacketEntity || msg instanceof S18PacketEntityTeleport) {
+                PlayerChecks.onMovePacket();
+            } else if (msg instanceof S23PacketBlockChange) {
                 S23PacketBlockChange packet = (S23PacketBlockChange) msg;
                 placed(packet.getBlockPosition(), packet.getBlockState());
             } else if (msg instanceof S22PacketMultiBlockChange) {

@@ -243,8 +243,17 @@ public class InfoRenderer {
             int cps = s.cps(now);
             String c = cps >= 16 ? "§c" : cps >= 11 ? "§e" : "§a";
             rows.add(new Row("CPS", c + cps + " §8/ " + s.maxCps()));
-        } else {
-            rows.add(new Row("CPS", "§8-"));
+            double[] reach = s.reachStats();
+            if (reach != null) {
+                String rc = reach[0] >= 3.3 ? "§c" : reach[0] >= 3.0 ? "§e" : "§a";
+                rows.add(new Row("Reach", rc + String.format("%.2f", reach[0]) + " §8méd / "
+                        + String.format("%.2f", reach[1]) + " máx"));
+            }
+            float aim = s.aimError();
+            if (aim >= 0) {
+                String ac = aim < 3 ? "§c" : aim < 6 ? "§e" : "§a";
+                rows.add(new Row("Mira", ac + String.format("%.1f°", aim) + " §8erro médio"));
+            }
         }
 
         if (data.isLoading()) {

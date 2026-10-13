@@ -59,6 +59,18 @@ falsos positivos. Use como ponto de partida para observar o jogador.
   contam. O painel mostra a linha **Mira** com o erro médio (vermelho < 3°, amarelo < 6°). O
   servidor arredonda a rotação para ~1.4°, então esse número nunca chega a zero.
 
+- **FakeLag / Blink**: o jogador estava andando, congela por 200 ms ou mais (o servidor para de
+  mandar a posição dele) e depois "teleporta" o caminho que teria andado. Só conta se outros jogadores
+  continuaram se mexendo nesse tempo (senão o lag é seu ou do servidor) e se o ping dele no TAB está
+  abaixo de 200 ms (lag de verdade costuma vir com ping alto). Alerta com 3 casos em 15 s, ou 2 em
+  combate.
+- **Backtrack / Reach**: em cada hit do jogador (a vítima toma dano logo depois de um swing dele,
+  mirando nela) o mod mede a distância do olho dele até a hitbox da vítima. O painel mostra a linha
+  **Reach** (média / máximo). Se o hit passou de 3.3 blocos, o mod procura nas posições antigas da
+  vítima (até 1 s atrás) qual seria alcançável: se for uma posição mais antiga do que o ping dele
+  explica, conta como Backtrack; se nenhuma for alcançável, conta como Reach. Alerta com 3 em 20 s.
+  A sua própria latência também distorce essas distâncias em alguns décimos, então confira com calma.
+
 Cada alerta mostra quantas vezes disparou e fica visível por 30 s após o último disparo.
 
 ## Compilar

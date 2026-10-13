@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Coleta dados dos jogadores no client e roda heurísticas simples (AutoClick, SafeWalk, NoSlow,
- * Scaffold, AimAssist).
+ * Scaffold, AimAssist, FakeLag, Backtrack).
  * Tudo aqui é estimativa feita só com o que o servidor envia ao client: serve como indício para
  * moderação, não como prova.
  */
@@ -37,6 +37,7 @@ public final class PlayerChecks {
     private final ConcurrentLinkedQueue<long[]> placements = new ConcurrentLinkedQueue<long[]>();
     /** Última vez que cada monitorado (minúsculo) foi visto no TAB ou no mundo. */
     private final Map<String, Long> lastOnline = new ConcurrentHashMap<String, Long>();
+    private final CombatChecks combat = new CombatChecks();
     private WorldClient lastWorld;
     private long worldChangedAt;
 
@@ -54,6 +55,7 @@ public final class PlayerChecks {
 
     public void reset() {
         stats.clear();
+        combat.reset();
     }
 
     /** Chamado na thread do netty a cada S0BPacketAnimation de swing. */
@@ -64,6 +66,11 @@ public final class PlayerChecks {
             stats.put(entityId, s);
         }
         s.addSwing(time);
+    }
+
+    /** Chamado na thread do netty para cada pacote de movimento de entidade (usado pelo FakeLag). */
+    public static void onMovePacket() {
+        CombatChecks.MOVE_PACKETS.incrementAndGet();
     }
 
     /** Chamado na thread do netty para cada bloco que virou sólido. */
@@ -111,6 +118,7 @@ public final class PlayerChecks {
             checkScaffold(player, s, now);
             checkAim(player, players, s, now);
         }
+        combat.tick(players, tracked, this, now);
         // Remove dados antigos (entidades que saíram / ids reutilizados).
         Iterator<Map.Entry<Integer, PlayerStats>> it = stats.entrySet().iterator();
         while (it.hasNext()) {
@@ -380,15 +388,15 @@ public final class PlayerChecks {
     // ---------------------------------------------------------------- posição
 
     /** Para outros jogadores usa a posição exata enviada pelo servidor (sem interpolação). */
-    private static double posX(EntityPlayer p) {
+    static double posX(EntityPlayer p) {
         return p instanceof EntityPlayerSP ? p.posX : p.serverPosX / 32.0;
     }
 
-    private static double posY(EntityPlayer p) {
+    static double posY(EntityPlayer p) {
         return p instanceof EntityPlayerSP ? p.posY : p.serverPosY / 32.0;
     }
 
-    private static double posZ(EntityPlayer p) {
+    static double posZ(EntityPlayer p) {
         return p instanceof EntityPlayerSP ? p.posZ : p.serverPosZ / 32.0;
     }
 
@@ -400,6 +408,8 @@ public final class PlayerChecks {
         s.noSlow.describe("NoSlow", now, out);
         s.scaffold.describe("Scaffold", now, out);
         s.aimAssist.describe("AimAssist", now, out);
+        s.fakeLag.describe("FakeLag", now, out);
+        s.backtrack.describe("Backtrack/Reach", now, out);
         return out;
     }
 }
