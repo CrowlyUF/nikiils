@@ -17,17 +17,13 @@ para ajudar na moderação.
 | `.info`           | Mostra a ajuda e quem está sendo monitorado        |
 | `.info clear`     | Remove todos                                       |
 
-O painel segue o jogador e aparece ao lado direito dele, visível através de paredes.
-Se o jogador estiver fora do alcance de renderização, um resumo aparece no canto superior esquerdo.
+Não precisa digitar o nick inteiro: `.info luiz` acha `luizgatinho771` entre quem está no TAB ou
+perto de você (se vários combinarem, escolhe o mais próximo e lista os outros no chat). Também dá
+para apertar **TAB** depois de `.info ` para completar o nick; cada TAB passa para o próximo.
 
-```
-luis50 [Mod]
-PING: 42ms
-CPS: 9 (máx 12)
-Bans: Nenhum
-Mute: Não
-! SafeWalk x2 (ponte sem agachar)
-```
+O painel (arredondado, fundo preto translúcido com blur do que está atrás) fica ao lado direito do
+jogador, visível através de paredes. A borda fica vermelha quando há alerta. Quem estiver fora do
+alcance de renderização aparece no canto superior esquerdo.
 
 ## De onde vem cada informação
 
