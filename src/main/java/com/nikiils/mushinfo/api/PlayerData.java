@@ -8,6 +8,8 @@ public final class PlayerData {
 
     public String username;
     public String rank;
+    /** Cor da tag do rank (RGB), ex.: 0xAA00AA para Mod. */
+    public int rankColor = 0xAAAAAA;
     public boolean online;
     public boolean banned;
     public int banBlacklistCount;

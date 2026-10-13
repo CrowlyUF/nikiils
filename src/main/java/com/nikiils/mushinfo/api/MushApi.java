@@ -124,6 +124,13 @@ public final class MushApi {
         JsonObject tag = r.has("rank_tag") && r.get("rank_tag").isJsonObject() ? r.getAsJsonObject("rank_tag") : null;
         if (tag != null && tag.has("name")) {
             d.rank = tag.get("name").getAsString();
+            if (tag.has("color")) {
+                try {
+                    d.rankColor = Integer.parseInt(tag.get("color").getAsString().replace("#", ""), 16);
+                } catch (NumberFormatException ignored) {
+                    // mantém a cor padrão
+                }
+            }
         }
         d.online = bool(r, "connected");
         return d;

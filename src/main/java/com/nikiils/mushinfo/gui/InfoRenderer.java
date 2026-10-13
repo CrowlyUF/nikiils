@@ -8,7 +8,7 @@ import com.nikiils.mushinfo.check.PlayerStats;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.gui.FontRenderer;
-import net.minecraft.client.gui.Gui;
+import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.network.NetworkPlayerInfo;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.entity.RenderManager;
@@ -16,175 +16,275 @@ import net.minecraft.entity.player.EntityPlayer;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
+import org.lwjgl.BufferUtils;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.util.glu.GLU;
 
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Desenha o painel ao lado dos jogadores monitorados (e um resumo no HUD para quem está longe). */
+/**
+ * Painel arredondado com fundo borrado ao lado de cada jogador monitorado. A posição do jogador é
+ * projetada na tela durante o render do mundo, e o painel é desenhado em 2D no HUD (assim o blur
+ * pega exatamente o que está atrás dele).
+ */
 public class InfoRenderer {
 
-    private static final int BG = 0x90000000;
-    private static final int BORDER = 0xFF55FFFF;
-    private static final int ALERT_BORDER = 0xFFFF5555;
+    private static final int PAD = 6;
+    private static final int RADIUS = 6;
+    private static final int ROW_GAP = 3;
+    private static final int BG = 0xB4000000;
+    private static final int OUTLINE = 0x22FFFFFF;
+    private static final int OUTLINE_ALERT = 0xAAFF4444;
+    private static final int SEPARATOR = 0x30FFFFFF;
+    private static final int LABEL = 0xFF9A9A9A;
+    private static final int ALERT = 0xFFFF5555;
 
-    private final Set<String> visible = new HashSet<String>();
+    private final FloatBuffer modelview = BufferUtils.createFloatBuffer(16);
+    private final FloatBuffer projection = BufferUtils.createFloatBuffer(16);
+    private final IntBuffer viewport = BufferUtils.createIntBuffer(16);
+    private final FloatBuffer screen = BufferUtils.createFloatBuffer(3);
+
+    /** Jogadores projetados no último frame do mundo (em pixels reais, origem embaixo à esquerda). */
+    private final List<Target> targets = new ArrayList<Target>();
+    private final Set<String> loaded = new HashSet<String>();
+
+    private static final class Target {
+        final EntityPlayer player;
+        final float x;
+        final float y;
+        final double dist;
+
+        Target(EntityPlayer player, float x, float y, double dist) {
+            this.player = player;
+            this.x = x;
+            this.y = y;
+            this.dist = dist;
+        }
+    }
+
+    private static final class Row {
+        final String label;
+        final String value;
+
+        Row(String label, String value) {
+            this.label = label;
+            this.value = value;
+        }
+    }
 
     @SubscribeEvent
     public void onRenderWorld(RenderWorldLastEvent event) {
         Minecraft mc = Minecraft.getMinecraft();
-        visible.clear();
+        targets.clear();
+        loaded.clear();
         if (mc.theWorld == null || mc.thePlayer == null) {
             return;
         }
+        modelview.clear();
+        projection.clear();
+        viewport.clear();
+        GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, modelview);
+        GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, projection);
+        GL11.glGetInteger(GL11.GL_VIEWPORT, viewport);
+
         RenderManager rm = mc.getRenderManager();
-        long now = System.currentTimeMillis();
+        double yaw = Math.toRadians(rm.playerViewY);
+        // Vetor "direita" da câmera no plano horizontal.
+        // (playerViewY já vem girado 180° na câmera frontal do F5.)
+        double rightX = -Math.cos(yaw), rightZ = -Math.sin(yaw);
+        float pt = event.partialTicks;
+
         for (EntityPlayer player : new ArrayList<EntityPlayer>(mc.theWorld.playerEntities)) {
             if (!Tracker.isTracked(player.getName())) {
                 continue;
             }
-            visible.add(player.getName().toLowerCase());
+            loaded.add(player.getName().toLowerCase());
             if (player instanceof EntityPlayerSP && mc.gameSettings.thirdPersonView == 0) {
                 continue;
             }
-            List<String> lines = buildLines(player.getName(), player, now);
-            List<String> alerts = PlayerChecks.alerts(PlayerChecks.INSTANCE.get(player), now);
-            double pt = event.partialTicks;
             double x = player.lastTickPosX + (player.posX - player.lastTickPosX) * pt - rm.viewerPosX;
             double y = player.lastTickPosY + (player.posY - player.lastTickPosY) * pt - rm.viewerPosY;
             double z = player.lastTickPosZ + (player.posZ - player.lastTickPosZ) * pt - rm.viewerPosZ;
-            drawPanel(mc, rm, x, y + player.height + 0.1, z, lines, alerts);
+            // Ponto 0.6 bloco à direita do jogador, na altura da cabeça.
+            double px = x + rightX * 0.6, py = y + player.height, pz = z + rightZ * 0.6;
+            screen.clear();
+            if (GLU.gluProject((float) px, (float) py, (float) pz, modelview, projection, viewport, screen)
+                    && screen.get(2) > 0 && screen.get(2) < 1) {
+                targets.add(new Target(player, screen.get(0), screen.get(1), Math.sqrt(x * x + y * y + z * z)));
+            }
         }
+        // Os mais distantes primeiro, para os mais próximos ficarem por cima.
+        targets.sort((a, b) -> Double.compare(b.dist, a.dist));
     }
 
-    private void drawPanel(Minecraft mc, RenderManager rm, double x, double y, double z,
-                           List<String> lines, List<String> alerts) {
-        FontRenderer fr = mc.fontRendererObj;
-        double dist = Math.sqrt(x * x + y * y + z * z);
-        float scale = (float) (0.02 * Math.max(1.0, dist / 7.0));
-
-        List<String> all = new ArrayList<String>(lines);
-        for (String a : alerts) {
-            all.add("§c! " + a);
+    @SubscribeEvent
+    public void onRenderHud(RenderGameOverlayEvent.Post event) {
+        if (event.type != RenderGameOverlayEvent.ElementType.ALL) {
+            return;
         }
-        int width = 0;
-        for (String s : all) {
-            width = Math.max(width, fr.getStringWidth(s));
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc.thePlayer == null || Tracker.names().isEmpty()) {
+            return;
         }
-        int lineH = fr.FONT_HEIGHT + 1;
-        int height = all.size() * lineH + 4;
+        ScaledResolution sr = new ScaledResolution(mc);
+        int sf = sr.getScaleFactor();
+        long now = System.currentTimeMillis();
 
         GlStateManager.pushMatrix();
-        GlStateManager.translate(x, y, z);
-        GlStateManager.rotate(-rm.playerViewY, 0.0F, 1.0F, 0.0F);
-        GlStateManager.rotate(mc.gameSettings.thirdPersonView == 2 ? -rm.playerViewX : rm.playerViewX, 1.0F, 0.0F, 0.0F);
-        GlStateManager.scale(-scale, -scale, scale);
-        // Ao lado direito do jogador (do ponto de vista de quem olha).
-        GlStateManager.translate(40.0F, 0.0F, 0.0F);
-        GlStateManager.disableLighting();
-        GlStateManager.depthMask(false);
         GlStateManager.disableDepth();
-        GlStateManager.enableBlend();
-        GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
+        GlStateManager.disableLighting();
+        RenderUtil.captureScreen();
 
-        int border = alerts.isEmpty() ? BORDER : ALERT_BORDER;
-        Gui.drawRect(-1, -1, width + 5, height + 1, border);
-        Gui.drawRect(0, 0, width + 4, height, BG);
-        int ty = 2;
-        for (String s : all) {
-            fr.drawStringWithShadow(s, 2, ty, 0xFFFFFFFF);
-            ty += lineH;
+        for (Target t : targets) {
+            float gx = t.x / sf;
+            float gy = (mc.displayHeight - t.y) / sf;
+            drawPanel(mc, t.player.getName(), t.player, gx, gy, sr, sf, now, false);
+        }
+
+        // Monitorados fora do alcance: lista no canto superior esquerdo.
+        float y = 6;
+        if (!mc.gameSettings.showDebugInfo) {
+            for (String name : Tracker.names()) {
+                if (!loaded.contains(name.toLowerCase())) {
+                    y += drawPanel(mc, name, null, 6, y, sr, sf, now, true) + 6;
+                }
+            }
         }
 
         GlStateManager.enableDepth();
-        GlStateManager.depthMask(true);
-        GlStateManager.enableLighting();
-        GlStateManager.disableBlend();
-        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
         GlStateManager.popMatrix();
     }
 
-    /** Resumo no canto da tela para jogadores monitorados que não estão no alcance de renderização. */
-    @SubscribeEvent
-    public void onRenderHud(RenderGameOverlayEvent.Text event) {
-        Minecraft mc = Minecraft.getMinecraft();
-        if (mc.thePlayer == null || mc.gameSettings.showDebugInfo) {
-            return;
+    /** Desenha um painel; retorna a altura. (x, y) é o canto superior esquerdo, ou a âncora do jogador. */
+    private float drawPanel(Minecraft mc, String name, EntityPlayer player, float x, float y,
+                            ScaledResolution sr, int sf, long now, boolean fixed) {
+        FontRenderer fr = mc.fontRendererObj;
+        PlayerData data = MushApi.get(name);
+        List<Row> rows = rows(name, player, data, now);
+        List<String> alerts = player != null
+                ? PlayerChecks.alerts(PlayerChecks.INSTANCE.get(player), now) : new ArrayList<String>();
+
+        String title = "§l" + (data.username != null ? data.username : name);
+        String rank = data.rank != null ? data.rank : null;
+        String subtitle = player == null ? "fora do alcance" : null;
+
+        int labelW = 0, valueW = 0;
+        for (Row r : rows) {
+            labelW = Math.max(labelW, fr.getStringWidth(r.label));
+            valueW = Math.max(valueW, fr.getStringWidth(r.value));
         }
-        int y = 4;
-        long now = System.currentTimeMillis();
-        for (String name : Tracker.names()) {
-            if (visible.contains(name.toLowerCase())) {
-                continue;
-            }
-            List<String> lines = buildLines(name, null, now);
-            int width = 0;
-            for (String s : lines) {
-                width = Math.max(width, mc.fontRendererObj.getStringWidth(s));
-            }
-            int h = lines.size() * (mc.fontRendererObj.FONT_HEIGHT + 1) + 3;
-            Gui.drawRect(3, y - 1, 3 + width + 5, y + h, BG);
-            int ty = y + 1;
-            for (String s : lines) {
-                mc.fontRendererObj.drawStringWithShadow(s, 5, ty, 0xFFFFFFFF);
-                ty += mc.fontRendererObj.FONT_HEIGHT + 1;
-            }
-            y += h + 4;
+        int contentW = labelW + 14 + valueW;
+        int titleW = fr.getStringWidth(title) + (rank != null ? fr.getStringWidth(rank) + 10 : 0);
+        contentW = Math.max(contentW, titleW);
+        if (subtitle != null) {
+            contentW = Math.max(contentW, fr.getStringWidth(subtitle));
         }
+        for (String a : alerts) {
+            contentW = Math.max(contentW, fr.getStringWidth(a) + 8);
+        }
+        int lineH = fr.FONT_HEIGHT + ROW_GAP;
+        float w = contentW + PAD * 2;
+        float h = PAD + fr.FONT_HEIGHT + (subtitle != null ? lineH : 0) + 5 + rows.size() * lineH
+                + (alerts.isEmpty() ? 0 : 3 + alerts.size() * lineH) + PAD - ROW_GAP;
+
+        if (!fixed) {
+            // Painel começa à direita do jogador com o topo um pouco acima da cabeça.
+            y -= 10;
+            x = Math.min(Math.max(2, x), sr.getScaledWidth() - w - 2);
+            y = Math.min(Math.max(2, y), sr.getScaledHeight() - h - 2);
+        }
+
+        RenderUtil.blur(x, y, w, h, RADIUS, sf);
+        RenderUtil.roundedRect(x, y, w, h, RADIUS, BG);
+        RenderUtil.roundedOutline(x, y, w, h, RADIUS, alerts.isEmpty() ? OUTLINE : OUTLINE_ALERT);
+
+        float cy = y + PAD;
+        fr.drawStringWithShadow(title, x + PAD, cy, 0xFFFFFFFF);
+        if (rank != null) {
+            // "Pílula" com a cor do rank.
+            int rw = fr.getStringWidth(rank) + 6;
+            float rx = x + w - PAD - rw;
+            RenderUtil.roundedRect(rx, cy - 2, rw, fr.FONT_HEIGHT + 3, 3, 0x55000000 | (data.rankColor & 0xFFFFFF));
+            fr.drawStringWithShadow(rank, rx + 3, cy, 0xFF000000 | brighten(data.rankColor));
+        }
+        cy += fr.FONT_HEIGHT;
+        if (subtitle != null) {
+            fr.drawStringWithShadow(subtitle, x + PAD, cy + ROW_GAP, 0xFF707070);
+            cy += lineH;
+        }
+        cy += 2;
+        RenderUtil.rect(x + PAD, cy, w - PAD * 2, 1, SEPARATOR);
+        cy += 3 + ROW_GAP;
+
+        for (Row r : rows) {
+            fr.drawStringWithShadow(r.label, x + PAD, cy, LABEL);
+            fr.drawStringWithShadow(r.value, x + w - PAD - fr.getStringWidth(r.value), cy, 0xFFFFFFFF);
+            cy += lineH;
+        }
+        if (!alerts.isEmpty()) {
+            RenderUtil.rect(x + PAD, cy, w - PAD * 2, 1, 0x40FF5555);
+            cy += 3 + ROW_GAP - 1;
+            for (String a : alerts) {
+                RenderUtil.circle(x + PAD + 2, cy + 3.5F, 2, ALERT);
+                fr.drawStringWithShadow(a, x + PAD + 8, cy, ALERT);
+                cy += lineH;
+            }
+        }
+        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+        return h;
     }
 
-    private static List<String> buildLines(String name, EntityPlayer player, long now) {
-        List<String> lines = new ArrayList<String>();
-        PlayerData data = MushApi.get(name);
-        String rank = data.rank != null ? " §7[" + data.rank + "]" : "";
-        String display = data.username != null ? data.username : name;
-        lines.add("§b§l" + display + rank + (player == null ? " §8(longe)" : ""));
+    private static int brighten(int rgb) {
+        int r = Math.min(255, (rgb >> 16 & 255) + 60);
+        int g = Math.min(255, (rgb >> 8 & 255) + 60);
+        int b = Math.min(255, (rgb & 255) + 60);
+        return r << 16 | g << 8 | b;
+    }
 
-        lines.add("§7PING: " + ping(name));
+    private static List<Row> rows(String name, EntityPlayer player, PlayerData data, long now) {
+        List<Row> rows = new ArrayList<Row>();
+        rows.add(new Row("Ping", ping(name)));
 
         if (player != null) {
             PlayerStats s = PlayerChecks.INSTANCE.get(player);
             int cps = s.cps(now);
             String c = cps >= 16 ? "§c" : cps >= 11 ? "§e" : "§a";
-            lines.add("§7CPS: " + c + cps + " §8(máx " + s.maxCps() + ")");
+            rows.add(new Row("CPS", c + cps + " §8/ " + s.maxCps()));
         } else {
-            lines.add("§7CPS: §8-");
+            rows.add(new Row("CPS", "§8-"));
         }
 
         if (data.isLoading()) {
-            lines.add("§7Bans: §8carregando...");
-            lines.add("§7Mute: §8carregando...");
+            rows.add(new Row("Bans", "§8..."));
+            rows.add(new Row("Mute", "§8..."));
         } else if (data.error != null) {
-            lines.add("§7Bans: §8" + data.error);
-            lines.add("§7Mute: §8" + data.error);
+            rows.add(new Row("Bans", "§8" + data.error));
+            rows.add(new Row("Mute", "§8" + data.error));
         } else {
             String bans;
             if (data.banned) {
-                bans = "§cBanido";
-                if (data.banBlacklistCount > 0) {
-                    bans += " §7(blacklist x" + data.banBlacklistCount + ")";
-                }
+                bans = "§cBanido" + (data.banBlacklistCount > 0 ? " §7(blacklist " + data.banBlacklistCount + ")" : "");
             } else if (data.banCount > 0) {
-                bans = "§6" + data.banCount + " §7(não banido agora)";
+                bans = "§6" + data.banCount;
             } else {
                 bans = "§aNenhum";
             }
-            lines.add("§7Bans: " + bans);
-            String mute = data.muted ? "§cMutado" : data.muteCount > 0 ? "§6" + data.muteCount : "§aNão";
-            lines.add("§7Mute: " + mute);
+            rows.add(new Row("Bans", bans));
+            rows.add(new Row("Mute", data.muted ? "§cMutado" : data.muteCount > 0 ? "§6" + data.muteCount : "§aNão"));
         }
-        return lines;
+        return rows;
     }
 
     private static String ping(String name) {
         Minecraft mc = Minecraft.getMinecraft();
-        if (mc.getNetHandler() == null) {
-            return "§8?";
-        }
-        NetworkPlayerInfo info = mc.getNetHandler().getPlayerInfo(name);
+        NetworkPlayerInfo info = mc.getNetHandler() != null ? mc.getNetHandler().getPlayerInfo(name) : null;
         if (info == null) {
-            return "§8? (fora do tab)";
+            return "§8?";
         }
         int ms = info.getResponseTime();
         String c = ms < 80 ? "§a" : ms < 150 ? "§e" : ms < 250 ? "§6" : "§c";
