@@ -47,7 +47,7 @@ public class ChatInterceptor {
         String[] args = msg.split("\\s+");
         if (args.length < 2) {
             Collection<String> names = Tracker.names();
-            send("§7Uso: §f.info <nick>§7 (de novo para remover), §f.info clear");
+            send("§7Uso: §f.info <nick>§7 (de novo para remover), §f.info clear§7, §f.info blur");
             send("§7Monitorando: §f" + (names.isEmpty() ? "ninguém" : String.join(", ", names)));
             return true;
         }
@@ -55,6 +55,11 @@ public class ChatInterceptor {
         if (query.equalsIgnoreCase("clear")) {
             Tracker.clear();
             send("\u00a7eLista de monitorados limpa.");
+            return true;
+        }
+        if (query.equalsIgnoreCase("blur")) {
+            RenderUtil.blurEnabled = !RenderUtil.blurEnabled;
+            send(RenderUtil.blurEnabled ? "\u00a7aBlur ligado." : "\u00a7eBlur desligado (mais FPS).");
             return true;
         }
         if (!query.matches("[A-Za-z0-9_]{1,16}")) {

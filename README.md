@@ -16,12 +16,13 @@ para ajudar na moderação.
 | `.info <nick>`    | Começa a mostrar o painel do jogador (repita para remover) |
 | `.info`           | Mostra a ajuda e quem está sendo monitorado        |
 | `.info clear`     | Remove todos                                       |
+| `.info blur`      | Liga/desliga o blur do fundo (mais FPS desligado)  |
 
 Não precisa digitar o nick inteiro: `.info luiz` acha `luizgatinho771` entre quem está no TAB ou
 perto de você (se vários combinarem, escolhe o mais próximo e lista os outros no chat). Também dá
 para apertar **TAB** depois de `.info ` para completar o nick; cada TAB passa para o próximo.
 
-O painel (arredondado, fundo preto translúcido com blur do que está atrás) fica ao lado direito do
+O painel diminui com a distância (até metade do tamanho a ~40 blocos). O painel (arredondado, fundo preto translúcido com blur do que está atrás) fica ao lado direito do
 jogador, visível através de paredes. A borda fica vermelha quando há alerta. O painel só aparece
 enquanto o jogador está perto o bastante para ser renderizado; quando ele sai do servidor (some do
 TAB), para de ser monitorado automaticamente e uma mensagem avisa no chat.
@@ -64,12 +65,15 @@ falsos positivos. Use como ponto de partida para observar o jogador.
   continuaram se mexendo nesse tempo (senão o lag é seu ou do servidor) e se o ping dele no TAB está
   abaixo de 200 ms (lag de verdade costuma vir com ping alto). Alerta com 3 casos em 15 s, ou 2 em
   combate.
-- **Backtrack / Reach**: em cada hit do jogador (a vítima toma dano logo depois de um swing dele,
-  mirando nela) o mod mede a distância do olho dele até a hitbox da vítima. O painel mostra a linha
-  **Reach** (média / máximo). Se o hit passou de 3.3 blocos, o mod procura nas posições antigas da
-  vítima (até 1 s atrás) qual seria alcançável: se for uma posição mais antiga do que o ping dele
-  explica, conta como Backtrack; se nenhuma for alcançável, conta como Reach. Alerta com 3 em 20 s.
-  A sua própria latência também distorce essas distâncias em alguns décimos, então confira com calma.
+- **Reach / Backtrack**: em cada hit do jogador (a vítima toma dano até 200 ms depois de um swing
+  dele, mirando nela) o mod mede a distância do olho dele até a hitbox da vítima. Um jogador legit
+  vê a vítima um pouco no passado (ping + interpolação), então a distância usada é a **menor** entre
+  ele e as posições da vítima dentro dessa janela de atraso (3 a 10 ticks, conforme o ping dele): é o
+  caso mais favorável a ele, para não acusar hit legit em quem está correndo ou tomando knockback.
+  Hits com teleporte/lag no meio são descartados. O painel mostra a linha **Reach** (média / máximo).
+  - **Reach**: acima de 3.25 blocos, pelo menos 3 vezes em 20 s, e 30%+ dos últimos hits acima de 3.2.
+  - **Backtrack**: o hit não alcança a vítima dentro da janela, mas alcança uma posição bem mais
+    antiga (o "bate onde o alvo estava"). 3 vezes em 20 s.
 
 Cada alerta mostra quantas vezes disparou e fica visível por 30 s após o último disparo.
 

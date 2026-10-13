@@ -135,12 +135,11 @@ public class InfoRenderer {
         GlStateManager.disableLighting();
         // Os polígonos arredondados são desenhados em sentido horário; com o culling ligado eles somem.
         GlStateManager.disableCull();
-        RenderUtil.captureScreen();
 
         for (Target t : targets) {
             float gx = t.x / sf;
             float gy = (mc.displayHeight - t.y) / sf;
-            drawPanel(mc, t.player.getName(), t.player, gx, gy, sr, sf, now, false);
+            drawPanel(mc, t.player.getName(), t.player, gx, gy, sr, sf, now, scaleFor(t.dist));
         }
 
         GlStateManager.enableCull();
@@ -150,7 +149,7 @@ public class InfoRenderer {
 
     /** Desenha um painel; retorna a altura. (x, y) é o canto superior esquerdo, ou a âncora do jogador. */
     private float drawPanel(Minecraft mc, String name, EntityPlayer player, float x, float y,
-                            ScaledResolution sr, int sf, long now, boolean fixed) {
+                            ScaledResolution sr, int sf, long now, float scale) {
         FontRenderer fr = mc.fontRendererObj;
         PlayerData data = MushApi.get(name);
         List<Row> rows = rows(name, player, data, now);
@@ -180,14 +179,16 @@ public class InfoRenderer {
         float h = PAD + fr.FONT_HEIGHT + (subtitle != null ? lineH : 0) + 5 + rows.size() * lineH
                 + (alerts.isEmpty() ? 0 : 3 + alerts.size() * lineH) + PAD - ROW_GAP;
 
-        if (!fixed) {
-            // Painel começa à direita do jogador com o topo um pouco acima da cabeça.
-            y -= 10;
-            x = Math.min(Math.max(2, x), sr.getScaledWidth() - w - 2);
-            y = Math.min(Math.max(2, y), sr.getScaledHeight() - h - 2);
-        }
+        // Painel começa à direita do jogador com o topo um pouco acima da cabeça.
+        float ox = Math.min(Math.max(2, x), sr.getScaledWidth() - w * scale - 2);
+        float oy = Math.min(Math.max(2, y - 10 * scale), sr.getScaledHeight() - h * scale - 2);
+        GlStateManager.pushMatrix();
+        GlStateManager.translate(ox, oy, 0);
+        GlStateManager.scale(scale, scale, 1);
+        x = 0;
+        y = 0;
 
-        RenderUtil.blur(x, y, w, h, RADIUS, sf);
+        RenderUtil.blur(w, h, RADIUS, ox, oy, scale, sf);
         RenderUtil.roundedRect(x, y, w, h, RADIUS, BG);
         RenderUtil.roundedOutline(x, y, w, h, RADIUS, alerts.isEmpty() ? OUTLINE : OUTLINE_ALERT);
 
@@ -224,7 +225,13 @@ public class InfoRenderer {
             }
         }
         GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
-        return h;
+        GlStateManager.popMatrix();
+        return h * scale;
+    }
+
+    /** Tamanho do painel: normal até 6 blocos, diminuindo até a metade a partir de ~40 blocos. */
+    private static float scaleFor(double dist) {
+        return (float) Math.max(0.5, Math.min(1.0, 1.0 - (dist - 6.0) / 34.0 * 0.5));
     }
 
     private static int brighten(int rgb) {

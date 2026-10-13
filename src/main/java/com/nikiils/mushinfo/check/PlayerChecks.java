@@ -409,7 +409,8 @@ public final class PlayerChecks {
         s.scaffold.describe("Scaffold", now, out);
         s.aimAssist.describe("AimAssist", now, out);
         s.fakeLag.describe("FakeLag", now, out);
-        s.backtrack.describe("Backtrack/Reach", now, out);
+        s.backtrack.describe("Backtrack", now, out);
+        s.reach.describe("Reach", now, out);
         return out;
     }
 }

@@ -23,9 +23,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Descartamos congelamentos em que ninguém mais se mexeu (o lag é nosso ou do servidor) e jogadores
  * com ping alto (lag de verdade).
  *
- * Backtrack: o cheater atrasa os pacotes que recebe e bate onde o alvo estava há pouco. Em cada hit
- * medimos o reach até a posição atual da vítima e até as posições dos últimos ticks; se o hit só
- * é possível numa posição bem mais antiga do que o ping dele explica, é Backtrack.
+ * Backtrack/Reach: o cheater atrasa os pacotes que recebe e bate onde o alvo estava há pouco (ou
+ * simplesmente bate de longe). Veja {@link #onHurt}.
  */
 final class CombatChecks {
 
@@ -133,11 +132,22 @@ final class CombatChecks {
 
     // ---------------------------------------------------------------- Backtrack / Reach
 
+    /**
+     * Mede cada hit de um jogador monitorado.
+     *
+     * Um jogador legit enxerga a vítima um pouco no passado (metade do ping dele + interpolação), e o
+     * servidor aceita o hit nessa posição. Por isso o reach "compensado" é a MENOR distância entre o
+     * atacante (últimos 3 ticks) e a vítima dentro dessa janela de atraso — é o caso mais favorável
+     * ao atacante, então só sobra reach alto quando ele realmente bateu de longe.
+     *
+     * Backtrack: dentro da janela o hit não alcança, mas alcança uma posição bem mais antiga.
+     */
     private void onHurt(EntityPlayer victim, Victim v, List<EntityPlayer> tracked, PlayerChecks checks, long now) {
         EntityPlayer attacker = null;
         float bestErr = 35.0F;
         for (EntityPlayer a : tracked) {
-            if (a == victim || now - checks.get(a).lastSwing() > 250L) {
+            long sinceSwing = now - checks.get(a).lastSwing();
+            if (a == victim || sinceSwing > 200L || sinceSwing < 0) {
                 continue;
             }
             double dx = PlayerChecks.posX(victim) - PlayerChecks.posX(a);
@@ -155,41 +165,68 @@ final class CombatChecks {
         if (attacker == null) {
             return;
         }
-        PlayerStats s = checks.get(attacker);
-        double ex = PlayerChecks.posX(attacker);
-        double ey = PlayerChecks.posY(attacker) + (attacker.isSneaking() ? 1.54 : 1.62);
-        double ez = PlayerChecks.posZ(attacker);
-
-        double[][] hist = v.positions.toArray(new double[0][]);
-        if (hist.length == 0) {
+        Victim av = victims.get(attacker.getEntityId());
+        double[][] vh = v.positions.toArray(new double[0][]);
+        double[][] ah = av != null ? av.positions.toArray(new double[0][]) : new double[0][];
+        if (vh.length < 3 || ah.length < 3) {
             return;
         }
-        double current = reach(ex, ey, ez, hist[0]);
-        s.addReach(current);
+        double eye = attacker.isSneaking() ? 1.54 : 1.62;
 
-        if (current <= 3.3) {
-            return;
-        }
-        // Atraso que um jogador legit teria: metade do ping + ~2 ticks de interpolação.
         int ping = ping(attacker);
-        int expectedTicks = (ping < 0 ? 200 : ping) / 50 + 2;
-        int matchTick = -1;
-        for (int k = 1; k < hist.length; k++) {
-            if (reach(ex, ey, ez, hist[k]) <= LEGIT_REACH) {
-                matchTick = k;
-                break;
+        int window = Math.max(3, Math.min(10, (ping < 0 ? 150 : ping) / 50 + 3));
+        window = Math.min(window, vh.length - 1);
+        // Teleporte/lag no meio da janela deixa a medida sem sentido.
+        for (int k = 0; k < Math.min(vh.length - 1, window + 6); k++) {
+            if (dist(vh[k], vh[k + 1]) > 1.5) {
+                return;
             }
         }
-        if (matchTick > expectedTicks + 2) {
-            if (s.backtrackHit(now) >= 3) {
-                s.backtrack.flag(now, String.format("bate onde o alvo estava há ~%dms", matchTick * 50));
+
+        double compensated = Double.MAX_VALUE;
+        for (int k = 0; k <= window; k++) {
+            compensated = Math.min(compensated, bestReach(ah, eye, vh[k]));
+        }
+        PlayerStats s = checks.get(attacker);
+        s.addReach(compensated);
+
+        if (compensated > 3.15) {
+            int matchTick = -1;
+            for (int k = window + 1; k < vh.length; k++) {
+                if (bestReach(ah, eye, vh[k]) <= LEGIT_REACH) {
+                    matchTick = k;
+                    break;
+                }
             }
-        } else if (matchTick < 0) {
-            // Longe até das posições antigas: reach puro.
-            if (s.farHit(now) >= 3) {
-                s.backtrack.flag(now, String.format("hit a %.2f blocos", current));
+            if (matchTick > 0) {
+                if (s.backtrackHit(now) >= 3 && s.hits() >= 6) {
+                    s.backtrack.flag(now, String.format("bate onde o alvo estava h\u00e1 ~%dms (ping %dms)",
+                            matchTick * 50, Math.max(ping, 0)));
+                }
+                return;
             }
         }
+        if (compensated > 3.25) {
+            // Precisa repetir e ser uma fatia relevante dos hits (um hit estranho é normal com lag).
+            if (s.farHit(now) >= 3 && s.hits() >= 8 && s.reachAbove(3.2) >= Math.max(3, s.hits() * 3 / 10)) {
+                s.reach.flag(now, String.format("%.2f blocos, %d de %d hits acima de 3.2",
+                        compensated, s.reachAbove(3.2), s.hits()));
+            }
+        }
+    }
+
+    /** Menor reach entre as últimas 3 posições do atacante e uma posição da vítima. */
+    private static double bestReach(double[][] attacker, double eye, double[] victim) {
+        double best = Double.MAX_VALUE;
+        for (int j = 0; j < Math.min(3, attacker.length); j++) {
+            best = Math.min(best, reach(attacker[j][0], attacker[j][1] + eye, attacker[j][2], victim));
+        }
+        return best;
+    }
+
+    private static double dist(double[] a, double[] b) {
+        double dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     /** Distância do olho do atacante até a hitbox da vítima (com a margem de 0.1 do vanilla). */

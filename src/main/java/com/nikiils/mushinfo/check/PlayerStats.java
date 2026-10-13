@@ -22,6 +22,7 @@ public final class PlayerStats {
     final Flag aimAssist = new Flag();
     final Flag fakeLag = new Flag();
     final Flag backtrack = new Flag();
+    final Flag reach = new Flag();
 
     // FakeLag
     boolean lagHasPos;
@@ -281,6 +282,20 @@ public final class PlayerStats {
             max = Math.max(max, r);
         }
         return new double[]{sum / reaches.size(), max};
+    }
+
+    int hits() {
+        return reaches.size();
+    }
+
+    int reachAbove(double threshold) {
+        int n = 0;
+        for (double r : reaches) {
+            if (r > threshold) {
+                n++;
+            }
+        }
+        return n;
     }
 
     int backtrackHit(long now) {

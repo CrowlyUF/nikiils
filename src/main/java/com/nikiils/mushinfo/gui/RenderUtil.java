@@ -14,10 +14,15 @@ import java.nio.ByteBuffer;
 final class RenderUtil {
 
     private static final int CORNER_SEGMENTS = 8;
-    /** Deslocamentos (em pixels reais) usados para o blur: centro + 3 anéis de 8 amostras. */
+    /** Deslocamentos (em pixels reais) usados para o blur: centro + 2 anéis de 6 amostras. */
     private static final float[][] BLUR_OFFSETS = buildOffsets();
+    /** Margem copiada em volta do painel para o blur ter o que espalhar nas bordas. */
+    private static final int MARGIN = 8;
 
-    private static int screenTex = -1;
+    /** Liga/desliga o blur (".info blur"), para PCs mais fracos. */
+    static boolean blurEnabled = true;
+
+    private static int tex = -1;
     private static int texW;
     private static int texH;
 
@@ -25,37 +30,25 @@ final class RenderUtil {
     }
 
     private static float[][] buildOffsets() {
-        float[][] out = new float[1 + 3 * 8][];
+        float[][] out = new float[1 + 2 * 6][];
         out[0] = new float[]{0, 0};
         int i = 1;
-        for (int ring = 1; ring <= 3; ring++) {
-            float r = ring * 2.2F;
-            for (int k = 0; k < 8; k++) {
-                double a = Math.PI * 2 * k / 8 + ring * 0.4;
+        for (int ring = 1; ring <= 2; ring++) {
+            float r = ring * 2.5F;
+            for (int k = 0; k < 6; k++) {
+                double a = Math.PI * 2 * k / 6 + ring * 0.5;
                 out[i++] = new float[]{(float) (Math.cos(a) * r), (float) (Math.sin(a) * r)};
             }
         }
         return out;
     }
 
-    /** Copia o que já foi desenhado na tela para uma textura (uma vez por frame, antes dos painéis). */
-    static void captureScreen() {
-        Minecraft mc = Minecraft.getMinecraft();
-        int w = mc.displayWidth, h = mc.displayHeight;
-        if (screenTex < 0) {
-            screenTex = GL11.glGenTextures();
+    private static int pow2(int v) {
+        int p = 64;
+        while (p < v) {
+            p <<= 1;
         }
-        GlStateManager.bindTexture(screenTex);
-        if (w != texW || h != texH) {
-            texW = w;
-            texH = h;
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
-            GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGB, w, h, 0, GL11.GL_RGB, GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
-        }
-        GL11.glCopyTexSubImage2D(GL11.GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+        return p;
     }
 
     /** Pontos do contorno de um retângulo arredondado (coordenadas da GUI). */
@@ -74,28 +67,58 @@ final class RenderUtil {
         return pts;
     }
 
-    /** Desenha a cópia borrada da tela recortada no formato arredondado. */
-    static void blur(float x, float y, float w, float h, float r, int scaleFactor) {
-        if (screenTex < 0) {
+    /**
+     * Desenha o fundo borrado do painel. Copia só a área atrás do painel (não a tela inteira) para uma
+     * textura RGBA (mesmo formato do framebuffer, sem conversão lenta) e desenha a cópia deslocada 13
+     * vezes com média progressiva. Os vértices são locais ao painel; (ox, oy, scale) é a posição e a
+     * escala do painel na GUI, usadas para achar os pixels reais.
+     */
+    static void blur(float w, float h, float r, float ox, float oy, float scale, int sf) {
+        if (!blurEnabled) {
             return;
         }
-        float[][] pts = outline(x, y, w, h, r);
+        Minecraft mc = Minecraft.getMinecraft();
+        // Região em pixels reais, com origem embaixo à esquerda (como o OpenGL).
+        int rx = Math.max(0, (int) Math.floor(ox * sf) - MARGIN);
+        int ryTop = Math.max(0, (int) Math.floor(oy * sf) - MARGIN);
+        int rw = Math.min(mc.displayWidth - rx, (int) Math.ceil(w * scale * sf) + MARGIN * 2);
+        int rh = Math.min(mc.displayHeight - ryTop, (int) Math.ceil(h * scale * sf) + MARGIN * 2);
+        if (rw <= 0 || rh <= 0) {
+            return;
+        }
+        int ry = mc.displayHeight - ryTop - rh;
+
+        if (tex < 0) {
+            tex = GL11.glGenTextures();
+        }
+        GlStateManager.bindTexture(tex);
+        if (rw > texW || rh > texH) {
+            texW = Math.max(texW, pow2(rw));
+            texH = Math.max(texH, pow2(rh));
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
+            GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA8, texW, texH, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
+        }
+        GL11.glCopyTexSubImage2D(GL11.GL_TEXTURE_2D, 0, 0, 0, rx, ry, rw, rh);
+
+        float[][] pts = outline(0, 0, w, h, r);
         Tessellator tess = Tessellator.getInstance();
         WorldRenderer wr = tess.getWorldRenderer();
         GlStateManager.enableTexture2D();
         GlStateManager.enableBlend();
         GlStateManager.tryBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ZERO);
         GlStateManager.disableAlpha();
-        GlStateManager.bindTexture(screenTex);
         for (int i = 0; i < BLUR_OFFSETS.length; i++) {
             // Média progressiva: a amostra i entra com peso 1/(i+1).
             GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F / (i + 1));
-            float ox = BLUR_OFFSETS[i][0], oy = BLUR_OFFSETS[i][1];
+            float dx = BLUR_OFFSETS[i][0], dy = BLUR_OFFSETS[i][1];
             wr.begin(GL11.GL_POLYGON, DefaultVertexFormats.POSITION_TEX);
             for (float[] p : pts) {
-                float px = p[0] * scaleFactor + ox;
-                float py = p[1] * scaleFactor + oy;
-                wr.pos(p[0], p[1], 0).tex(px / texW, 1.0F - py / texH).endVertex();
+                float px = (ox + p[0] * scale) * sf + dx - rx;
+                float py = mc.displayHeight - (oy + p[1] * scale) * sf + dy - ry;
+                wr.pos(p[0], p[1], 0).tex(px / texW, py / texH).endVertex();
             }
             tess.draw();
         }
