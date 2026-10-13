@@ -1,0 +1,10 @@
+[
+  {
+    "modid": "mushinfo",
+    "name": "MushInfo",
+    "description": "Mostra ping, CPS, bans e mutes (API do MushMC) ao lado de um jogador. Use .info <nick> no chat.",
+    "version": "${version}",
+    "mcversion": "1.8.9",
+    "authorList": ["nikiils"]
+  }
+]
