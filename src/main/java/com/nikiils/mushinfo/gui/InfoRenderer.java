@@ -23,9 +23,7 @@ import org.lwjgl.util.glu.GLU;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Painel arredondado com fundo borrado ao lado de cada jogador monitorado. A posição do jogador é
@@ -37,7 +35,7 @@ public class InfoRenderer {
     private static final int PAD = 6;
     private static final int RADIUS = 6;
     private static final int ROW_GAP = 3;
-    private static final int BG = 0xB4000000;
+    private static final int BG = 0xD2000000;
     private static final int OUTLINE = 0x22FFFFFF;
     private static final int OUTLINE_ALERT = 0xAAFF4444;
     private static final int SEPARATOR = 0x30FFFFFF;
@@ -51,7 +49,6 @@ public class InfoRenderer {
 
     /** Jogadores projetados no último frame do mundo (em pixels reais, origem embaixo à esquerda). */
     private final List<Target> targets = new ArrayList<Target>();
-    private final Set<String> loaded = new HashSet<String>();
 
     private static final class Target {
         final EntityPlayer player;
@@ -81,7 +78,6 @@ public class InfoRenderer {
     public void onRenderWorld(RenderWorldLastEvent event) {
         Minecraft mc = Minecraft.getMinecraft();
         targets.clear();
-        loaded.clear();
         if (mc.theWorld == null || mc.thePlayer == null) {
             return;
         }
@@ -103,7 +99,6 @@ public class InfoRenderer {
             if (!Tracker.isTracked(player.getName())) {
                 continue;
             }
-            loaded.add(player.getName().toLowerCase());
             if (player instanceof EntityPlayerSP && mc.gameSettings.thirdPersonView == 0) {
                 continue;
             }
@@ -128,7 +123,7 @@ public class InfoRenderer {
             return;
         }
         Minecraft mc = Minecraft.getMinecraft();
-        if (mc.thePlayer == null || Tracker.names().isEmpty()) {
+        if (mc.thePlayer == null || targets.isEmpty()) {
             return;
         }
         ScaledResolution sr = new ScaledResolution(mc);
@@ -138,6 +133,8 @@ public class InfoRenderer {
         GlStateManager.pushMatrix();
         GlStateManager.disableDepth();
         GlStateManager.disableLighting();
+        // Os polígonos arredondados são desenhados em sentido horário; com o culling ligado eles somem.
+        GlStateManager.disableCull();
         RenderUtil.captureScreen();
 
         for (Target t : targets) {
@@ -146,16 +143,7 @@ public class InfoRenderer {
             drawPanel(mc, t.player.getName(), t.player, gx, gy, sr, sf, now, false);
         }
 
-        // Monitorados fora do alcance: lista no canto superior esquerdo.
-        float y = 6;
-        if (!mc.gameSettings.showDebugInfo) {
-            for (String name : Tracker.names()) {
-                if (!loaded.contains(name.toLowerCase())) {
-                    y += drawPanel(mc, name, null, 6, y, sr, sf, now, true) + 6;
-                }
-            }
-        }
-
+        GlStateManager.enableCull();
         GlStateManager.enableDepth();
         GlStateManager.popMatrix();
     }
@@ -171,7 +159,7 @@ public class InfoRenderer {
 
         String title = "§l" + (data.username != null ? data.username : name);
         String rank = data.rank != null ? data.rank : null;
-        String subtitle = player == null ? "fora do alcance" : null;
+        String subtitle = null;
 
         int labelW = 0, valueW = 0;
         for (Row r : rows) {

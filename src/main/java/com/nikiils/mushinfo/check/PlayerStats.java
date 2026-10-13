@@ -18,6 +18,18 @@ public final class PlayerStats {
     final Flag autoClick = new Flag();
     final Flag safeWalk = new Flag();
     final Flag noSlow = new Flag();
+    final Flag scaffold = new Flag();
+    final Flag aimAssist = new Flag();
+
+    /** Blocos colocados: {tempo, pitch, embaixo (1/0)}. */
+    private final ArrayDeque<double[]> placed = new ArrayDeque<double[]>();
+    private final ArrayDeque<Double> yHistory = new ArrayDeque<Double>();
+    private final ArrayDeque<Float> aimErrors = new ArrayDeque<Float>();
+    private final ArrayDeque<Long> snaps = new ArrayDeque<Long>();
+    boolean newPlacement;
+    float lastYaw;
+    float lastDesired;
+    Object lastTarget;
 
     long lastSeen;
     int edgeTicks;
@@ -115,5 +127,98 @@ public final class PlayerStats {
             sum += s;
         }
         return speeds.isEmpty() ? 0 : sum / speeds.size();
+    }
+
+    void addPlacement(long time, float pitch, boolean under) {
+        placed.addLast(new double[]{time, pitch, under ? 1 : 0});
+        while (placed.size() > 40) {
+            placed.removeFirst();
+        }
+        newPlacement = true;
+    }
+
+    void clearPlacements() {
+        placed.clear();
+    }
+
+    int placementsSince(long since) {
+        int n = 0;
+        for (double[] p : placed) {
+            if (p[0] >= since) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    int forwardPlacementsSince(long since, float maxPitch) {
+        int n = 0;
+        for (double[] p : placed) {
+            if (p[0] >= since && p[1] < maxPitch) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    int underPlacementsSince(long since) {
+        int n = 0;
+        for (double[] p : placed) {
+            if (p[0] >= since && p[2] == 1) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    void pushY(double y) {
+        yHistory.addLast(y);
+        while (yHistory.size() > 20) {
+            yHistory.removeFirst();
+        }
+    }
+
+    /** Quanto o jogador subiu nos últimos {@code ticks} ticks (20 ticks = 1 s). */
+    double riseOver(int ticks) {
+        if (yHistory.size() < ticks) {
+            return 0;
+        }
+        return yHistory.peekLast() - yHistory.peekFirst();
+    }
+
+    void addAimSample(float err) {
+        aimErrors.addLast(err);
+        while (aimErrors.size() > 60) {
+            aimErrors.removeFirst();
+        }
+    }
+
+    int aimSamples() {
+        return aimErrors.size();
+    }
+
+    void clearAim() {
+        aimErrors.clear();
+    }
+
+    /** Erro médio da mira em graus, ou -1 se ainda não há amostras suficientes. */
+    public float aimError() {
+        if (aimErrors.size() < 10) {
+            return -1;
+        }
+        float sum = 0;
+        for (float e : aimErrors) {
+            sum += e;
+        }
+        return sum / aimErrors.size();
+    }
+
+    /** Registra um giro brusco e retorna quantos houve nos últimos 10 s. */
+    int snap(long now) {
+        snaps.addLast(now);
+        while (!snaps.isEmpty() && now - snaps.peekFirst() > 10_000L) {
+            snaps.removeFirst();
+        }
+        return snaps.size();
     }
 }

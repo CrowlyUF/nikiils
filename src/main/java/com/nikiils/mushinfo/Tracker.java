@@ -25,6 +25,10 @@ public final class Tracker {
         }
     }
 
+    public static void remove(String name) {
+        TRACKED.remove(name.toLowerCase());
+    }
+
     public static boolean isTracked(String name) {
         return TRACKED.containsKey(name.toLowerCase());
     }

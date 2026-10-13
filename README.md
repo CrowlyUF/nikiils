@@ -22,8 +22,9 @@ perto de você (se vários combinarem, escolhe o mais próximo e lista os outros
 para apertar **TAB** depois de `.info ` para completar o nick; cada TAB passa para o próximo.
 
 O painel (arredondado, fundo preto translúcido com blur do que está atrás) fica ao lado direito do
-jogador, visível através de paredes. A borda fica vermelha quando há alerta. Quem estiver fora do
-alcance de renderização aparece no canto superior esquerdo.
+jogador, visível através de paredes. A borda fica vermelha quando há alerta. O painel só aparece
+enquanto o jogador está perto o bastante para ser renderizado; quando ele sai do servidor (some do
+TAB), para de ser monitorado automaticamente e uma mensagem avisa no chat.
 
 ## De onde vem cada informação
 
@@ -48,6 +49,15 @@ falsos positivos. Use como ponto de partida para observar o jogador.
   quando ele está olhando para baixo (fazendo ponte).
 - **NoSlow**: andando a mais de ~0.17 bloco/tick enquanto defende com a espada, come ou puxa o arco
   (o normal é ~0.04).
+
+- **Scaffold**: blocos colocados embaixo/atrás do jogador enquanto ele olha para frente (pitch < 40°,
+  3 vezes em 3 s), 11+ blocos por segundo, ponte com 8+ blocos/s correndo (> 0.26 b/t) sem agachar,
+  ou Tower subindo 3+ blocos por segundo enquanto coloca bloco embaixo.
+- **AimAssist**: enquanto o jogador bate em alguém que se move de lado, o mod mede o erro da mira
+  (diferença entre para onde ele olha e o centro do oponente). Média abaixo de 3° em 40 amostras =
+  mira "grudada". Giros de mais de 60° em 1 tick que já param em cima do alvo (3 em 10 s) também
+  contam. O painel mostra a linha **Mira** com o erro médio (vermelho < 3°, amarelo < 6°). O
+  servidor arredonda a rotação para ~1.4°, então esse número nunca chega a zero.
 
 Cada alerta mostra quantas vezes disparou e fica visível por 30 s após o último disparo.
 
