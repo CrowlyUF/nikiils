@@ -7,6 +7,12 @@ import java.util.Iterator;
 public final class PlayerStats {
 
     private static final int CPS_SAMPLES = 10;
+    /**
+     * O servidor 1.8 só repassa o swing de outro jogador quando a animação anterior passou da metade
+     * (3 de 6 ticks), então de fora nunca se vê mais que ~6-7 swings/s, por mais rápido que ele clique.
+     * A partir disso o CPS real é desconhecido ("7+").
+     */
+    public static final int SWING_CAP = 6;
     private static final int SPEED_SAMPLES = 5;
 
     private final ArrayDeque<Long> swings = new ArrayDeque<Long>();
@@ -90,7 +96,15 @@ public final class PlayerStats {
      * os swings por tick (50 ms), então intervalos entre cliques não são confiáveis; a variação do CPS
      * segundo a segundo é. Humanos variam bastante; autoclickers ficam quase fixos.
      */
-    synchronized void sampleCps(long now) {
+    /** Segundos seguidos com o clique no limite que o servidor deixa ver. */
+    private int saturatedSeconds;
+
+    /**
+     * A cada segundo guarda o CPS. Para o próprio jogador (cliques locais, sem limite) verifica CPS alto
+     * ou constante demais. Para os outros, como o servidor corta em ~7, só dá para ver que ele está no
+     * limite: ficar no limite 30 s seguidos, sem nenhuma pausa, é o padrão de quem segura um autoclick.
+     */
+    synchronized void sampleCps(long now, boolean self) {
         while (!swings.isEmpty() && now - swings.peekFirst() > 10_000L) {
             swings.removeFirst();
         }
@@ -113,6 +127,13 @@ public final class PlayerStats {
         }
         maxCps = Math.max(maxCps, cps);
 
+        if (!self) {
+            saturatedSeconds = cps >= SWING_CAP ? saturatedSeconds + 1 : 0;
+            if (saturatedSeconds > 0 && saturatedSeconds % 30 == 0) {
+                autoClick.flag(now, "clique no limite " + saturatedSeconds + "s sem parar");
+            }
+            return;
+        }
         if (cps >= 20) {
             autoClick.flag(now, cps + " CPS");
         } else if (cpsSamples.size() >= 8) {
@@ -127,7 +148,7 @@ public final class PlayerStats {
             }
             double sd = Math.sqrt(var / cpsSamples.size());
             if (mean >= 10 && sd < 0.75) {
-                autoClick.flag(now, String.format("CPS constante %.1f±%.2f", mean, sd));
+                autoClick.flag(now, String.format("CPS constante %.1f\u00b1%.2f", mean, sd));
                 cpsSamples.clear();
             }
         }

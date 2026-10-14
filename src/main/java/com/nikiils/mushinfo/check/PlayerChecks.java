@@ -111,7 +111,7 @@ public final class PlayerChecks {
         for (EntityPlayer player : tracked) {
             PlayerStats s = get(player);
             s.lastSeen = now;
-            s.sampleCps(now);
+            s.sampleCps(now, player instanceof EntityPlayerSP);
             s.pushY(posY(player));
             checkSafeWalk(mc.theWorld, player, s, now);
             checkNoSlow(player, s, now);

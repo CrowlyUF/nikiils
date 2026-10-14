@@ -229,6 +229,10 @@ public class InfoRenderer {
         return h * scale;
     }
 
+    private static String cpsText(int cps) {
+        return cps >= PlayerStats.SWING_CAP ? "7+" : String.valueOf(cps);
+    }
+
     /** Tamanho do painel: normal até 6 blocos, diminuindo até a metade a partir de ~40 blocos. */
     private static float scaleFor(double dist) {
         return (float) Math.max(0.5, Math.min(1.0, 1.0 - (dist - 6.0) / 34.0 * 0.5));
@@ -248,8 +252,14 @@ public class InfoRenderer {
         if (player != null) {
             PlayerStats s = PlayerChecks.INSTANCE.get(player);
             int cps = s.cps(now);
-            String c = cps >= 16 ? "§c" : cps >= 11 ? "§e" : "§a";
-            rows.add(new Row("CPS", c + cps + " §8/ " + s.maxCps()));
+            if (player instanceof EntityPlayerSP) {
+                String c = cps >= 16 ? "§c" : cps >= 11 ? "§e" : "§a";
+                rows.add(new Row("CPS", c + cps + " §8/ " + s.maxCps()));
+            } else {
+                // Acima de ~7 o servidor não repassa mais swings: o valor real é desconhecido.
+                String c = cps >= PlayerStats.SWING_CAP ? "§e" : "§a";
+                rows.add(new Row("CPS", c + cpsText(cps) + " §8/ " + cpsText(s.maxCps())));
+            }
             double[] reach = s.reachStats();
             if (reach != null) {
                 String rc = reach[0] >= 3.3 ? "§c" : reach[0] >= 3.0 ? "§e" : "§a";

@@ -30,8 +30,11 @@ TAB), para de ser monitorado automaticamente e uma mensagem avisa no chat.
 ## De onde vem cada informação
 
 - **PING**: latência do jogador na lista do TAB (a mesma das barrinhas).
-- **CPS**: cada clique em 1.8 gera uma animação de braço que o servidor repassa aos outros
-  jogadores; o mod lê esses pacotes (`S0BPacketAnimation`) e conta quantos chegaram no último segundo.
+- **CPS**: cada clique gera uma animação de braço que o servidor repassa aos outros jogadores; o mod
+  conta essas animações (`S0BPacketAnimation`) no último segundo. **Limite do 1.8:** o servidor só
+  repassa a animação quando a anterior já passou da metade (3 de 6 ticks), então de fora nunca se vê
+  mais que ~6-7 por segundo. A partir disso o painel mostra **7+** (CPS real desconhecido). No
+  próprio jogador (`.info <seu nick>`) os cliques são contados direto do mouse, sem limite.
 - **Bans**: campos `banned` e `ban_blacklist_count` da API. A API só mostra se o jogador está banido
   *agora*; ela não expõe o histórico de bans.
 - **Mute**: a API pública atualmente não expõe mute. O mod lê qualquer campo com "mute" que venha a
@@ -43,8 +46,10 @@ TAB), para de ser monitorado automaticamente e uma mensagem avisa no chat.
 Tudo é calculado no client com o que o servidor envia, então lag e perda de pacotes podem gerar
 falsos positivos. Use como ponto de partida para observar o jogador.
 
-- **AutoClick**: CPS ≥ 20, ou CPS ≥ 10 quase constante (desvio < 0.75) por 8 segundos seguidos.
-  Humanos variam bastante segundo a segundo; autoclickers não.
+- **AutoClick**: como o CPS dos outros é cortado em ~7, não dá para ver 15 ou 20 CPS. O que dá para
+  ver é ficar **no limite 30 segundos seguidos sem nenhuma pausa**, padrão de quem segura um
+  autoclick (humanos param de clicar de vez em quando). No próprio jogador também vale CPS ≥ 20 ou
+  CPS ≥ 10 quase constante por 8 s.
 - **SafeWalk**: jogador sem agachar, no chão, com o centro do corpo para fora do bloco (sustentado só
   pela borda da hitbox) sobre um vão de 2+ blocos por 5+ ticks seguidos. Mostra "ponte sem agachar"
   quando ele está olhando para baixo (fazendo ponte).
