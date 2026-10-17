@@ -41,13 +41,18 @@ public class ChatInterceptor {
     /** Retorna true se a mensagem foi tratada como comando do mod. */
     static boolean handle(String message) {
         String msg = message.trim();
+        if (msg.equalsIgnoreCase(".bind") || msg.toLowerCase().startsWith(".bind ")) {
+            bind(msg.split("\\s+"));
+            return true;
+        }
         if (!msg.equalsIgnoreCase(".info") && !msg.toLowerCase().startsWith(".info ")) {
             return false;
         }
         String[] args = msg.split("\\s+");
         if (args.length < 2) {
             Collection<String> names = Tracker.names();
-            send("§7Aperte §fRShift§7 para abrir a GUI. §f.info <nick>§7 abre direto no jogador.");
+            send("§7Aperte §f" + MushGui.boundKey() + "§7 para abrir a GUI. §f.info <nick>§7 abre direto no jogador.");
+            send("§f.bind clickgui <tecla>§7 troca a tecla de abrir a GUI.");
             send("§f.info clear§7 remove todos os cards, §f.info blur§7 liga/desliga o blur.");
             send("§7Cards ativos: §f" + (names.isEmpty() ? "nenhum" : String.join(", ", names)));
             return true;
@@ -102,6 +107,19 @@ public class ChatInterceptor {
                     + (online.size() > 6 ? "\u00a77..." : "") + " \u00a78(use TAB para escolher)");
         }
         return online.get(0);
+    }
+
+    /** .bind clickgui <tecla> */
+    private static void bind(String[] args) {
+        if (args.length < 3 || !args[1].equalsIgnoreCase("clickgui")) {
+            send("§7Uso: §f.bind clickgui <tecla>§7 (ex.: §f.bind clickgui j§7). Atual: §f" + MushGui.boundKey());
+            return;
+        }
+        if (MushGui.bind(args[2])) {
+            send("§aClickGUI agora abre com a tecla §f" + MushGui.boundKey() + "§a.");
+        } else {
+            send("§cTecla desconhecida: §f" + args[2] + "§7 (use letras, números ou nomes como RSHIFT, F6, INSERT).");
+        }
     }
 
     private static void send(String text) {

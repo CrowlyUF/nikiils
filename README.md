@@ -11,7 +11,9 @@ jogador.
 
 ## Uso
 
-- **RShift** abre a ClickGUI (dá para trocar a tecla em Controles → MushInfo).
+- **R** abre a ClickGUI (e fecha de novo). Para trocar: `.bind clickgui <tecla>` no chat, por exemplo
+  `.bind clickgui j` (aceita letras, números e nomes como `RSHIFT`, `F6`, `INSERT`). A tecla fica salva
+  e também aparece em Controles → MushInfo.
 - `.info <nick>` no chat abre a GUI direto no jogador. Aceita pedaço do nick (`.info luiz` acha
   `luizgatinho771`) e **TAB** completa o nick.
 - `.info clear` remove todos os cards; `.info blur` liga/desliga o blur.

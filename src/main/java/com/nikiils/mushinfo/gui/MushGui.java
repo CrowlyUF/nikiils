@@ -40,7 +40,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * ClickGUI (RShift): lista de jogadores à esquerda (cabeça, original/pirata, alertas, busca) e os
+ * ClickGUI (tecla R por padrão, troca com ".bind clickgui <tecla>"): lista de jogadores à esquerda (cabeça, original/pirata, alertas, busca) e os
  * detalhes do selecionado à direita (informações, alertas, histórico e chat). As duas colunas rolam
  * com a roda do mouse ou segurando e arrastando.
  */
@@ -117,6 +117,22 @@ public class MushGui extends GuiScreen {
 
     // ================================================================ abrir
 
+    /** Troca a tecla de abrir a GUI. Retorna false se o nome da tecla não existe. */
+    public static boolean bind(String keyName) {
+        int code = Keyboard.getKeyIndex(keyName.toUpperCase());
+        if (code == Keyboard.KEY_NONE) {
+            return false;
+        }
+        Opener.KEY.setKeyCode(code);
+        KeyBinding.resetKeyBindingArrayAndHash();
+        Minecraft.getMinecraft().gameSettings.saveOptions();
+        return true;
+    }
+
+    public static String boundKey() {
+        return Keyboard.getKeyName(Opener.KEY.getKeyCode());
+    }
+
     /** Abre no próximo tick (o chat fecha a si mesmo logo depois de mandar a mensagem). */
     public static void requestOpen(String name) {
         pendingOpen = name;
@@ -125,7 +141,9 @@ public class MushGui extends GuiScreen {
 
     /** Tecla e abertura agendada. */
     public static final class Opener {
-        private final KeyBinding key = new KeyBinding("Abrir MushInfo", Keyboard.KEY_RSHIFT, "MushInfo");
+        /** Tecla que abre a GUI. Fica salva no options.txt do Minecraft como qualquer outra tecla. */
+        static final KeyBinding KEY = new KeyBinding("Abrir MushInfo", Keyboard.KEY_R, "MushInfo");
+        private final KeyBinding key = KEY;
 
         public Opener() {
             ClientRegistry.registerKeyBinding(key);
@@ -855,7 +873,8 @@ public class MushGui extends GuiScreen {
 
     @Override
     protected void keyTyped(char c, int key) throws IOException {
-        if (key == Keyboard.KEY_ESCAPE || key == Keyboard.KEY_RSHIFT) {
+        // A tecla de abrir também fecha, menos enquanto digita na busca.
+        if (key == Keyboard.KEY_ESCAPE || (key == Opener.KEY.getKeyCode() && !search.isFocused())) {
             mc.displayGuiScreen(null);
             return;
         }
