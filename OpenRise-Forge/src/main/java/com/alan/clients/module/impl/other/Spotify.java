@@ -29,6 +29,7 @@ import static com.alan.clients.layer.Layers.*;
 @DevelopmentFeature
 @ModuleInfo(aliases = {"module.other.spotify.name"}, description = "module.other.spotify.description", category = Category.RENDER)
 public class Spotify extends Module {
+    private volatile boolean failing;
     public final DragValue positionValue = new DragValue("Position", this, new Vector2d(200, 200));
     public String song = "Loading...";
     public String artist = "Loading...";
@@ -144,7 +145,6 @@ public class Spotify extends Module {
                 Scanner s = new Scanner(responseStream).useDelimiter("\\A");
                 String response = s.hasNext() ? s.next() : "";
                 JSONObject obj = new JSONObject(response);
-                ChatUtil.display(response);
                 progress_ms = obj.getInt("progress_ms");
                 JSONObject item = obj.getJSONObject("item");
                 JSONObject album = item.getJSONObject("album");
@@ -157,10 +157,13 @@ public class Spotify extends Module {
                 JSONObject author = new JSONObject(arists.get(0).toString());
                 artist = Normalizer.normalize(author.getString("name"), Normalizer.Form.NFKD).replaceAll("[^\\p{ASCII}]", "");
                 updatedInfo = false;
+                failing = false;
             }
         } catch (Exception e) {
-            ChatUtil.display(e);
-            if (!client_id.isEmpty() && !client_secret.isEmpty()) {
+            // report once per failure streak instead of every second
+            if (!failing) ChatUtil.display("Spotify: " + e.getMessage());
+            failing = true;
+            if (client_id != null && !client_id.isEmpty() && client_secret != null && !client_secret.isEmpty()) {
                 ChatUtil.display("Spotify auth token expired. Login... Please wait");
 //                auth();
             }
@@ -169,20 +172,19 @@ public class Spotify extends Module {
     }
     @EventLink
     public final Listener<TickEvent> onTick = event -> {
-        new Thread(() -> {
-//            System.out.println(ticks % (20 * 60));
-            if (ticks % (20 * 60) == 0 && this.isEnabled()) {
-                updatedInfo = false;
-                getSpotifyInfo();
-            }
-            if (ticks % 20 == 0 && this.isEnabled()) {
-                if ((progress_ms + 1000) > duration_ms) {
-                    getSpotifyInfo();
-                } else {
-                    progress_ms += 1000;
-                }
-            }
-            ticks++;
-        }).start();
+        // Rise started a new thread every tick; only go off-thread when a request is actually due
+        final boolean refresh = ticks % (20 * 60) == 0;
+        final boolean second = ticks % 20 == 0;
+        ticks++;
+
+        if (!this.isEnabled() || !(refresh || second)) return;
+
+        if (!refresh && progress_ms + 1000 <= duration_ms) {
+            progress_ms += 1000;
+            return;
+        }
+
+        if (refresh) updatedInfo = false;
+        new Thread(this::getSpotifyInfo, "OpenRise Spotify").start();
     };
 }

@@ -6,7 +6,7 @@ configs and themes.
 
 - Minecraft **1.8.9**, Forge **11.15.1.2318** (any 1.8.9 Forge build should work)
 - Java **8** at runtime, which is what Forge 1.8.9 requires
-- Mod id `openrise`, jar `build/libs/OpenRise-6.2.4.jar`
+- Mod id `openrise`. A prebuilt jar is in [`release/OpenRise-6.2.4.jar`](release/OpenRise-6.2.4.jar)
 
 ## Build
 

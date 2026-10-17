@@ -3,7 +3,7 @@
 precision mediump float;
 #endif
 
-#extension GL_OES_standard_derivatives : enable
+uniform sampler2D u_diffuse_sampler;
 
 void main() {
     vec2 tex_coord = gl_TexCoord[0].st;

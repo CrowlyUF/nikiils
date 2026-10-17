@@ -46,8 +46,12 @@ public final class ClickGUI extends Module {
         mc.setIngameFocus();
         Keyboard.enableRepeatEvents(false);
         Client.INSTANCE.getEventBus().unregister(Client.INSTANCE.getClickGUI());
-        threadPool.execute(() -> Client.INSTANCE.getConfigManager()
-                .getLatestConfig().write());
+        threadPool.execute(() -> {
+            // null on a fresh install until the first config has been created
+            if (Client.INSTANCE.getConfigManager().getLatestConfig() != null) {
+                Client.INSTANCE.getConfigManager().getLatestConfig().write();
+            }
+        });
     }
 
     @EventLink(value = Priorities.HIGH)
