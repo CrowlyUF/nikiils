@@ -23,9 +23,14 @@ jogador.
   **Original** ou **Pirata**, quantos alertas tem (vermelho = alerta nos últimos 30 s) e um "C" se o
   card está ligado. Quem tem card ou alerta aparece primeiro. Busca no topo (ou é só começar a
   digitar), setas ↑/↓ trocam o selecionado.
-- **Detalhes** (direita): ping, CPS, reach, mira, bans, mute, primeiro/último login, amigos, rank, clã,
-  todos os alertas com contagem e motivo, histórico dos últimos alertas e o **chat** do jogador (as
-  últimas 100 mensagens vistas).
+- **Detalhes** (direita): cabeça, nick, rank, Original/Pirata e clã no topo, e três **abas** lado a
+  lado (clique ou setas ←/→):
+  - **Infos**: ping, CPS, reach, mira, bans, mute, primeiro/último login, amigos e total de alertas;
+  - **Alertas**: cada check que disparou, com contagem, motivo e há quanto tempo, e o histórico dos
+    últimos alertas;
+  - **Mensagens**: o chat do jogador (as últimas 100 mensagens vistas).
+
+  As abas Alertas e Mensagens mostram a contagem (vermelho = alerta nos últimos 30 s).
 - As duas colunas rolam com a **roda do mouse** ou **segurando e arrastando** (ou pela barrinha).
 - **Card info**: liga o card que segue o jogador e fica ao lado dele (ping, CPS, reach, mira, bans,
   mute e alertas ativos). O card some sozinho quando o jogador sai do servidor.

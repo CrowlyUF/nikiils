@@ -61,12 +61,17 @@ public class MushGui extends GuiScreen {
     private static final int ROW_H = 24;
     private static final int HEADER_H = 26;
     private static final int DETAIL_HEADER_H = 50;
+    private static final int TABS_H = 24;
+    private static final String[] TABS = {"Infos", "Alertas", "Mensagens"};
 
     private static final SimpleDateFormat TIME = new SimpleDateFormat("HH:mm:ss");
     private static final SimpleDateFormat DATE = new SimpleDateFormat("dd/MM/yyyy");
 
     /** Jogador selecionado (continua selecionado ao reabrir). */
     private static String selected;
+    /** Aba aberta nos detalhes (0 Infos, 1 Alertas, 2 Mensagens); continua ao trocar de jogador. */
+    private static int tab;
+    private float tabX = -1, tabW;
     private static String pendingOpen;
     private static boolean pending;
 
@@ -512,19 +517,84 @@ public class MushGui extends GuiScreen {
 
         RenderUtil.rect(detX + 8, detY + DETAIL_HEADER_H - 1, detW - 16, 1, 0x20FFFFFF);
 
-        // ---- conteúdo com rolagem
-        int top = detY + DETAIL_HEADER_H, viewH = detH - DETAIL_HEADER_H - 2;
+        drawTabs(mx, my, e.name, s, now);
+
+        // ---- conteúdo da aba, com rolagem
+        int top = contentTop(), viewH = contentViewH();
         clampDetail(viewH);
         RenderUtil.scissor(detX, top, detW, viewH);
         float y = top + 6 - detScroll;
         float start = y;
-        y = drawInfoGrid(e, d, s, y, now);
-        y = drawAlerts(s, y + 8, now);
-        y = drawHistory(s, y + 8, now);
-        y = drawChat(e.name, y + 8, now);
+        if (tab == 0) {
+            y = drawInfoGrid(e, d, s, y, now);
+        } else if (tab == 1) {
+            y = drawAlerts(s, y, now);
+            y = drawHistory(s, y + 10, now);
+        } else {
+            y = drawChat(e.name, y, now);
+        }
         detContentH = (int) (y - start) + 10;
         RenderUtil.endScissor();
         scrollbar(detX + detW - 5, top, viewH, detScroll, detContentH, drag == 4);
+    }
+
+    private int contentTop() {
+        return detY + DETAIL_HEADER_H + TABS_H;
+    }
+
+    private int contentViewH() {
+        return detH - DETAIL_HEADER_H - TABS_H - 2;
+    }
+
+    /** Abas lado a lado com um sublinhado que desliza até a aba ativa. */
+    private void drawTabs(int mx, int my, String name, PlayerStats s, long now) {
+        UiFont fr = UiFont.get();
+        int alerts = s != null ? s.totalFlags() : 0;
+        int messages = ChatLog.get(name).size();
+        float x = detX + 10, y = detY + DETAIL_HEADER_H + 4;
+        float activeX = x, activeW = 0;
+        for (int i = 0; i < TABS.length; i++) {
+            final int index = i;
+            int count = i == 1 ? alerts : i == 2 ? messages : -1;
+            float labelW = fr.getStringWidth(TABS[i]);
+            String countText = count > 0 ? String.valueOf(count) : null;
+            float badgeW = countText != null ? Math.max(11, fr.getStringWidth(countText) * 0.75F + 6) : 0;
+            float w = labelW + (countText != null ? badgeW + 4 : 0) + 12;
+            boolean active = tab == i;
+            boolean hover = RenderUtil.inside(mx, my, x, y, w, 16);
+            if (active) {
+                RenderUtil.roundedRect(x, y, w, 16, 5, 0x24FFFFFF);
+                activeX = x;
+                activeW = w;
+            } else if (hover) {
+                RenderUtil.roundedRect(x, y, w, 16, 5, HOVER);
+            }
+            fr.drawStringWithShadow(TABS[i], x + 6, y + 4, active ? 0xFFFFFFFF : (hover ? 0xFFCCCCCC : MUTED));
+            if (countText != null) {
+                boolean hot = i == 1 && s != null && s.hasActiveAlert(now);
+                float bx = x + 6 + labelW + 4;
+                RenderUtil.roundedRect(bx, y + 3.5F, badgeW, 9, 4.5F, hot ? 0xD0E03030 : (i == 1 ? 0x90A06020 : 0x504FC3F7));
+                small(countText, bx + (badgeW - fr.getStringWidth(countText) * 0.75F) / 2.0F, y + 5.5F, 0xFFFFFFFF);
+            }
+            buttons.add(new Button(x, y, w, 16, () -> selectTab(index)));
+            x += w + 4;
+        }
+        // Sublinhado animado.
+        if (tabX < 0) {
+            tabX = activeX;
+            tabW = activeW;
+        }
+        tabX += (activeX - tabX) * 0.35F;
+        tabW += (activeW - tabW) * 0.35F;
+        RenderUtil.roundedRect(tabX + 4, y + 17, tabW - 8, 2, 1, ACCENT);
+        RenderUtil.rect(detX + 8, contentTop() - 1, detW - 16, 1, 0x14FFFFFF);
+    }
+
+    private void selectTab(int index) {
+        if (tab != index) {
+            tab = index;
+            detTarget = detScroll = 0;
+        }
     }
 
     private float drawInfoGrid(Entry e, PlayerData d, PlayerStats s, float y, long now) {
@@ -573,7 +643,6 @@ public class MushGui extends GuiScreen {
 
     private float drawAlerts(PlayerStats s, float y, long now) {
         UiFont fr = UiFont.get();
-        y = section("Alertas", y);
         List<Check> fired = new ArrayList<Check>();
         if (s != null) {
             for (Check c : Check.values()) {
@@ -585,7 +654,7 @@ public class MushGui extends GuiScreen {
             Collections.sort(fired, (a, b) -> Long.compare(fs.lastFlag(b).time, fs.lastFlag(a).time));
         }
         if (fired.isEmpty()) {
-            fr.drawStringWithShadow("§aNenhum alerta", detX + 10, y, 0xFFFFFFFF);
+            fr.drawStringWithShadow("§aNenhum alerta para este jogador", detX + 10, y, 0xFFFFFFFF);
             return y + 10;
         }
         for (Check c : fired) {
@@ -625,7 +694,6 @@ public class MushGui extends GuiScreen {
     private float drawChat(String name, float y, long now) {
         UiFont fr = UiFont.get();
         List<ChatLog.Entry> log = ChatLog.get(name);
-        y = section("Chat (" + log.size() + ")", y);
         if (log.isEmpty()) {
             fr.drawStringWithShadow("§8Nenhuma mensagem vista ainda", detX + 10, y, 0xFFFFFFFF);
             return y + 10;
@@ -704,7 +772,7 @@ public class MushGui extends GuiScreen {
             }
         }
         int listTop = listY + 23, listView = listH - 27;
-        int detTop = detY + DETAIL_HEADER_H, detView = detH - DETAIL_HEADER_H - 2;
+        int detTop = contentTop(), detView = contentViewH();
         if (RenderUtil.inside(mx, my, listX + listW - 7, listTop, 7, listView) && listContentH > listView) {
             start(3, my, listTarget);
         } else if (RenderUtil.inside(mx, my, listX, listTop, listW, listView)) {
@@ -729,7 +797,7 @@ public class MushGui extends GuiScreen {
         if (Math.abs(dy) > 3) {
             dragMoved = true;
         }
-        int listView = listH - 27, detView = detH - DETAIL_HEADER_H - 2;
+        int listView = listH - 27, detView = contentViewH();
         switch (drag) {
             case 1:
                 if (dragMoved) {
@@ -797,6 +865,10 @@ public class MushGui extends GuiScreen {
             if (!before.equals(search.getText())) {
                 listTarget = listScroll = 0;
             }
+            return;
+        }
+        if (key == Keyboard.KEY_LEFT || key == Keyboard.KEY_RIGHT) {
+            selectTab((tab + (key == Keyboard.KEY_RIGHT ? 1 : TABS.length - 1)) % TABS.length);
             return;
         }
         if (key == Keyboard.KEY_DOWN || key == Keyboard.KEY_UP) {
