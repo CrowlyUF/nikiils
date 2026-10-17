@@ -7,7 +7,6 @@ import com.nikiils.mushinfo.check.PlayerChecks;
 import com.nikiils.mushinfo.check.PlayerStats;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
-import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.network.NetworkPlayerInfo;
 import net.minecraft.client.renderer.GlStateManager;
@@ -150,7 +149,7 @@ public class InfoRenderer {
     /** Desenha um painel; retorna a altura. (x, y) é o canto superior esquerdo, ou a âncora do jogador. */
     private float drawPanel(Minecraft mc, String name, EntityPlayer player, float x, float y,
                             ScaledResolution sr, int sf, long now, float scale) {
-        FontRenderer fr = mc.fontRendererObj;
+        UiFont fr = UiFont.get();
         PlayerData data = MushApi.get(name);
         List<Row> rows = rows(name, player, data, now);
         List<String> alerts = player != null

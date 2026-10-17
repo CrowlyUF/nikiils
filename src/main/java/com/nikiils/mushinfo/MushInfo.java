@@ -3,6 +3,7 @@ package com.nikiils.mushinfo;
 import com.nikiils.mushinfo.check.PlayerChecks;
 import com.nikiils.mushinfo.gui.ChatInterceptor;
 import com.nikiils.mushinfo.gui.InfoRenderer;
+import com.nikiils.mushinfo.gui.MushGui;
 import com.nikiils.mushinfo.net.PacketListener;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Mod;
@@ -15,9 +16,12 @@ public class MushInfo {
 
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
+        Settings.load();
         MinecraftForge.EVENT_BUS.register(new ChatInterceptor());
         MinecraftForge.EVENT_BUS.register(new InfoRenderer());
         MinecraftForge.EVENT_BUS.register(PlayerChecks.INSTANCE);
         MinecraftForge.EVENT_BUS.register(new PacketListener());
+        MinecraftForge.EVENT_BUS.register(new ChatLog());
+        MinecraftForge.EVENT_BUS.register(new MushGui.Opener());
     }
 }

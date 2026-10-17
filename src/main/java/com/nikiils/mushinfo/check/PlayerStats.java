@@ -1,69 +1,154 @@
 package com.nikiils.mushinfo.check;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 
-/** Dados coletados de um jogador (por id de entidade). */
+/** Tudo que o mod sabe de um jogador (por nick, sobrevive a respawn e troca de mundo). */
 public final class PlayerStats {
 
-    private static final int CPS_SAMPLES = 10;
     /**
      * O servidor 1.8 só repassa o swing de outro jogador quando a animação anterior passou da metade
      * (3 de 6 ticks), então de fora nunca se vê mais que ~6-7 swings/s, por mais rápido que ele clique.
      * A partir disso o CPS real é desconhecido ("7+").
      */
     public static final int SWING_CAP = 6;
-    private static final int SPEED_SAMPLES = 5;
+    /** Tempo que um alerta continua "ativo" (card e destaque na GUI) depois do último disparo. */
+    public static final long ACTIVE_MS = 30_000L;
+    private static final int HISTORY = 60;
 
+    public final String name;
+    volatile int entityId = -1;
+    long lastSeen;
+
+    // ---------------------------------------------------------------- flags
+    private final Map<Check, Integer> counts = new EnumMap<Check, Integer>(Check.class);
+    private final Map<Check, Flag> lastFlags = new EnumMap<Check, Flag>(Check.class);
+    private final ArrayDeque<Flag> history = new ArrayDeque<Flag>();
+
+    // ---------------------------------------------------------------- CPS
     private final ArrayDeque<Long> swings = new ArrayDeque<Long>();
     private final ArrayDeque<Integer> cpsSamples = new ArrayDeque<Integer>();
-    private final ArrayDeque<Double> speeds = new ArrayDeque<Double>();
     private long lastSample;
     private int maxCps;
+    private int saturatedSeconds;
 
-    final Flag autoClick = new Flag();
-    final Flag safeWalk = new Flag();
-    final Flag noSlow = new Flag();
-    final Flag scaffold = new Flag();
-    final Flag aimAssist = new Flag();
-    final Flag fakeLag = new Flag();
-    final Flag backtrack = new Flag();
-    final Flag reach = new Flag();
+    // ---------------------------------------------------------------- movimento
+    boolean hasPos;
+    double lastX, lastY, lastZ;
+    private final ArrayDeque<double[]> moves = new ArrayDeque<double[]>(); // {dx, dz, dy, onGround}
+    int edgeTicks;
+    boolean edgeLookingDown;
+    int usingTicks, noSlowTicks, sprintUseTicks, ticksSinceStopUsing = 100;
+    boolean wasUsing;
+    int speedTicks;
+    int ticksSinceHurt = 100;
+    int lastHurtTime;
+    int ticksSinceIce = 100;
+    double fallStartY = Double.NaN;
+    int landedTicksAgo = -1;
+    double landedFall;
+    int noFallCandidates;
+    long lastNoFallCandidate;
 
-    // FakeLag
+    // ---------------------------------------------------------------- rotação / swing
+    float lastYaw, lastPitch, lastDesired;
+    Object lastTarget;
+    int yawOnlyTicks, ticksSincePitch;
+    int swingBlockTicks;
+    boolean wasSneaking;
+    int perfectSneaks, ticksSinceSneak = 100, ticksSinceDeltaY = 100, horizontalTicks, scaffoldTicks;
+    long lastBreakAnim;
+    private final ArrayDeque<Float> aimErrors = new ArrayDeque<Float>();
+    private final ArrayDeque<Long> snaps = new ArrayDeque<Long>();
+
+    // ---------------------------------------------------------------- blocos
+    private final ArrayDeque<double[]> placed = new ArrayDeque<double[]>(); // {tempo, pitch, embaixo}
+    private final ArrayDeque<Double> yHistory = new ArrayDeque<Double>();
+    boolean newPlacement;
+    private final ArrayDeque<Long> fastMines = new ArrayDeque<Long>();
+
+    // ---------------------------------------------------------------- combate
     boolean lagHasPos;
-    double lagX;
-    double lagY;
-    double lagZ;
-    int frozenTicks;
-    int freezeTraffic;
-    double preFreezeSpeed;
-    /** Congelamentos suspeitos: {tempo, em combate (1/0)}. */
+    double lagX, lagY, lagZ, preFreezeSpeed;
+    int frozenTicks, freezeTraffic;
     private final ArrayDeque<long[]> lagEvents = new ArrayDeque<long[]>();
-
-    // Backtrack / Reach
     private final ArrayDeque<Double> reaches = new ArrayDeque<Double>();
     private final ArrayDeque<Long> backtrackHits = new ArrayDeque<Long>();
     private final ArrayDeque<Long> farHits = new ArrayDeque<Long>();
+    /** Resultado dos últimos hits recebidos: true = sem knockback. */
+    private final ArrayDeque<Boolean> kbResults = new ArrayDeque<Boolean>();
 
-    /** Blocos colocados: {tempo, pitch, embaixo (1/0)}. */
-    private final ArrayDeque<double[]> placed = new ArrayDeque<double[]>();
-    private final ArrayDeque<Double> yHistory = new ArrayDeque<Double>();
-    private final ArrayDeque<Float> aimErrors = new ArrayDeque<Float>();
-    private final ArrayDeque<Long> snaps = new ArrayDeque<Long>();
-    boolean newPlacement;
-    float lastYaw;
-    float lastDesired;
-    Object lastTarget;
+    PlayerStats(String name) {
+        this.name = name;
+    }
 
-    long lastSeen;
-    int edgeTicks;
-    boolean edgeLookingDown;
-    int usingTicks;
-    int noSlowTicks;
-    boolean hasLastPos;
-    double lastX;
-    double lastZ;
+    // ================================================================ flags
+
+    /** Registra um disparo. Disparos do mesmo check em menos de 1 s contam como um só. */
+    synchronized boolean flag(Check check, long now, String reason) {
+        Flag last = lastFlags.get(check);
+        Flag f = new Flag(check, now, reason);
+        lastFlags.put(check, f);
+        if (last != null && now - last.time < 1000L) {
+            return false;
+        }
+        Integer c = counts.get(check);
+        counts.put(check, c == null ? 1 : c + 1);
+        history.addFirst(f);
+        while (history.size() > HISTORY) {
+            history.removeLast();
+        }
+        Alerts.onFlag(this, f, counts.get(check));
+        return true;
+    }
+
+    public synchronized int count(Check check) {
+        Integer c = counts.get(check);
+        return c == null ? 0 : c;
+    }
+
+    public synchronized int totalFlags() {
+        int n = 0;
+        for (int c : counts.values()) {
+            n += c;
+        }
+        return n;
+    }
+
+    public synchronized Flag lastFlag(Check check) {
+        return lastFlags.get(check);
+    }
+
+    public synchronized List<Flag> history() {
+        return new ArrayList<Flag>(history);
+    }
+
+    /** Checks que dispararam nos últimos 30 s, com contagem e último motivo. */
+    public synchronized List<String> activeAlerts(long now) {
+        List<String> out = new ArrayList<String>();
+        for (Check c : Check.values()) {
+            Flag f = lastFlags.get(c);
+            if (f != null && now - f.time <= ACTIVE_MS) {
+                out.add(c.displayName + " x" + count(c) + " (" + f.reason + ")");
+            }
+        }
+        return out;
+    }
+
+    public synchronized boolean hasActiveAlert(long now) {
+        for (Flag f : lastFlags.values()) {
+            if (now - f.time <= ACTIVE_MS) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ================================================================ CPS
 
     synchronized void addSwing(long time) {
         swings.addLast(time);
@@ -72,11 +157,11 @@ public final class PlayerStats {
         }
     }
 
-    synchronized long lastSwing() {
+    public synchronized long lastSwing() {
         return swings.isEmpty() ? 0 : swings.peekLast();
     }
 
-    /** Cliques no último segundo. */
+    /** Swings no último segundo. */
     public synchronized int cps(long now) {
         int n = 0;
         Iterator<Long> it = swings.descendingIterator();
@@ -86,25 +171,17 @@ public final class PlayerStats {
         return n;
     }
 
-    /** Maior CPS medido nas últimas amostras (~10 s). */
     public synchronized int maxCps() {
         return maxCps;
     }
 
     /**
-     * A cada segundo guarda o CPS e verifica se os cliques estão constantes demais. O servidor agrupa
-     * os swings por tick (50 ms), então intervalos entre cliques não são confiáveis; a variação do CPS
-     * segundo a segundo é. Humanos variam bastante; autoclickers ficam quase fixos.
-     */
-    /** Segundos seguidos com o clique no limite que o servidor deixa ver. */
-    private int saturatedSeconds;
-
-    /**
      * A cada segundo guarda o CPS. Para o próprio jogador (cliques locais, sem limite) verifica CPS alto
      * ou constante demais. Para os outros, como o servidor corta em ~7, só dá para ver que ele está no
-     * limite: ficar no limite 30 s seguidos, sem nenhuma pausa, é o padrão de quem segura um autoclick.
+     * limite: ficar no limite 30 s seguidos sem nenhuma pausa é o padrão de quem segura um autoclick.
+     * {@code exempt}: minerando ou com vara de pesca (swing contínuo legítimo).
      */
-    synchronized void sampleCps(long now, boolean self) {
+    synchronized void sampleCps(long now, boolean self, boolean exempt) {
         while (!swings.isEmpty() && now - swings.peekFirst() > 10_000L) {
             swings.removeFirst();
         }
@@ -117,25 +194,24 @@ public final class PlayerStats {
             cpsSamples.clear();
         } else {
             cpsSamples.addLast(cps);
-            while (cpsSamples.size() > CPS_SAMPLES) {
+            while (cpsSamples.size() > 10) {
                 cpsSamples.removeFirst();
             }
         }
-        maxCps = 0;
+        maxCps = cps;
         for (int c : cpsSamples) {
             maxCps = Math.max(maxCps, c);
         }
-        maxCps = Math.max(maxCps, cps);
 
         if (!self) {
-            saturatedSeconds = cps >= SWING_CAP ? saturatedSeconds + 1 : 0;
+            saturatedSeconds = cps >= SWING_CAP && !exempt ? saturatedSeconds + 1 : 0;
             if (saturatedSeconds > 0 && saturatedSeconds % 30 == 0) {
-                autoClick.flag(now, "clique no limite " + saturatedSeconds + "s sem parar");
+                flag(Check.AUTOCLICK, now, "clique no limite " + saturatedSeconds + "s sem parar");
             }
             return;
         }
         if (cps >= 20) {
-            autoClick.flag(now, cps + " CPS");
+            flag(Check.AUTOCLICK, now, cps + " CPS");
         } else if (cpsSamples.size() >= 8) {
             double mean = 0;
             for (int c : cpsSamples) {
@@ -148,26 +224,101 @@ public final class PlayerStats {
             }
             double sd = Math.sqrt(var / cpsSamples.size());
             if (mean >= 10 && sd < 0.75) {
-                autoClick.flag(now, String.format("CPS constante %.1f\u00b1%.2f", mean, sd));
+                flag(Check.AUTOCLICK, now, String.format("CPS constante %.1f±%.2f", mean, sd));
                 cpsSamples.clear();
             }
         }
     }
 
-    void pushSpeed(double speed) {
-        speeds.addLast(speed);
-        while (speeds.size() > SPEED_SAMPLES) {
-            speeds.removeFirst();
+    // ================================================================ movimento
+
+    /** Guarda o deslocamento do tick (posição do servidor). */
+    void pushMove(double dx, double dy, double dz, boolean onGround) {
+        moves.addFirst(new double[]{dx, dz, dy, onGround ? 1 : 0});
+        while (moves.size() > 20) {
+            moves.removeLast();
         }
     }
 
-    double averageSpeed() {
+    /** Velocidade horizontal média dos últimos {@code ticks} ticks. */
+    double averageSpeed(int ticks) {
         double sum = 0;
-        for (double s : speeds) {
-            sum += s;
+        int n = 0;
+        for (double[] m : moves) {
+            if (n == ticks) {
+                break;
+            }
+            sum += Math.hypot(m[0], m[1]);
+            n++;
         }
-        return speeds.isEmpty() ? 0 : sum / speeds.size();
+        return n == 0 ? 0 : sum / n;
     }
+
+    int movesCount() {
+        return moves.size();
+    }
+
+    double maxStep(int ticks) {
+        double max = 0;
+        int n = 0;
+        for (double[] m : moves) {
+            if (n++ == ticks) {
+                break;
+            }
+            max = Math.max(max, Math.hypot(m[0], m[1]));
+        }
+        return max;
+    }
+
+    int groundTicks(int ticks) {
+        int g = 0, n = 0;
+        for (double[] m : moves) {
+            if (n++ == ticks) {
+                break;
+            }
+            g += (int) m[3];
+        }
+        return g;
+    }
+
+    void clearMoves() {
+        moves.clear();
+    }
+
+    // ================================================================ rotação
+
+    void addAimSample(float err) {
+        aimErrors.addLast(err);
+        while (aimErrors.size() > 60) {
+            aimErrors.removeFirst();
+        }
+    }
+
+    int aimSamples() {
+        return aimErrors.size();
+    }
+
+    void clearAim() {
+        aimErrors.clear();
+    }
+
+    /** Erro médio da mira em graus, ou -1 se ainda não há amostras suficientes. */
+    public float aimError() {
+        if (aimErrors.size() < 10) {
+            return -1;
+        }
+        float sum = 0;
+        for (float e : aimErrors) {
+            sum += e;
+        }
+        return sum / aimErrors.size();
+    }
+
+    int snap(long now) {
+        return count(snaps, now, 10_000L);
+    }
+
+    // ================================================================ blocos
 
     void addPlacement(long time, float pitch, boolean under) {
         placed.addLast(new double[]{time, pitch, under ? 1 : 0});
@@ -218,7 +369,6 @@ public final class PlayerStats {
         }
     }
 
-    /** Quanto o jogador subiu nos últimos {@code ticks} ticks (20 ticks = 1 s). */
     double riseOver(int ticks) {
         if (yHistory.size() < ticks) {
             return 0;
@@ -226,43 +376,12 @@ public final class PlayerStats {
         return yHistory.peekLast() - yHistory.peekFirst();
     }
 
-    void addAimSample(float err) {
-        aimErrors.addLast(err);
-        while (aimErrors.size() > 60) {
-            aimErrors.removeFirst();
-        }
+    int fastMine(long now) {
+        return count(fastMines, now, 30_000L);
     }
 
-    int aimSamples() {
-        return aimErrors.size();
-    }
+    // ================================================================ combate
 
-    void clearAim() {
-        aimErrors.clear();
-    }
-
-    /** Erro médio da mira em graus, ou -1 se ainda não há amostras suficientes. */
-    public float aimError() {
-        if (aimErrors.size() < 10) {
-            return -1;
-        }
-        float sum = 0;
-        for (float e : aimErrors) {
-            sum += e;
-        }
-        return sum / aimErrors.size();
-    }
-
-    /** Registra um giro brusco e retorna quantos houve nos últimos 10 s. */
-    int snap(long now) {
-        snaps.addLast(now);
-        while (!snaps.isEmpty() && now - snaps.peekFirst() > 10_000L) {
-            snaps.removeFirst();
-        }
-        return snaps.size();
-    }
-
-    /** Registra um congelamento suspeito e retorna quantos houve nos últimos 15 s. */
     int lagEvent(long now, boolean combat) {
         lagEvents.addLast(new long[]{now, combat ? 1 : 0});
         while (!lagEvents.isEmpty() && now - lagEvents.peekFirst()[0] > 15_000L) {
@@ -285,7 +404,7 @@ public final class PlayerStats {
         lagEvents.clear();
     }
 
-    void addReach(double reach) {
+    synchronized void addReach(double reach) {
         reaches.addLast(reach);
         while (reaches.size() > 20) {
             reaches.removeFirst();
@@ -293,7 +412,7 @@ public final class PlayerStats {
     }
 
     /** {média, máximo} do reach nos últimos hits, ou null se houver menos de 3. */
-    public double[] reachStats() {
+    public synchronized double[] reachStats() {
         if (reaches.size() < 3) {
             return null;
         }
@@ -305,11 +424,11 @@ public final class PlayerStats {
         return new double[]{sum / reaches.size(), max};
     }
 
-    int hits() {
+    synchronized int hits() {
         return reaches.size();
     }
 
-    int reachAbove(double threshold) {
+    synchronized int reachAbove(double threshold) {
         int n = 0;
         for (double r : reaches) {
             if (r > threshold) {
@@ -325,6 +444,21 @@ public final class PlayerStats {
 
     int farHit(long now) {
         return count(farHits, now, 20_000L);
+    }
+
+    /** Registra se o hit recebido teve knockback; retorna {sem KB, total} dos últimos 10. */
+    int[] addKnockback(boolean none) {
+        kbResults.addLast(none);
+        while (kbResults.size() > 10) {
+            kbResults.removeFirst();
+        }
+        int n = 0;
+        for (boolean b : kbResults) {
+            if (b) {
+                n++;
+            }
+        }
+        return new int[]{n, kbResults.size()};
     }
 
     private static int count(ArrayDeque<Long> q, long now, long window) {

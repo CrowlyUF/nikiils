@@ -52,6 +52,11 @@ public final class MushApi {
         return data;
     }
 
+    /** Dados em cache, sem disparar consulta (null se nunca consultado). */
+    public static PlayerData peek(String name) {
+        return CACHE.get(name.toLowerCase());
+    }
+
     public static void invalidate(String name) {
         CACHE.remove(name.toLowerCase());
     }
@@ -118,22 +123,50 @@ public final class MushApi {
         }
 
         JsonObject account = r.has("account") && r.get("account").isJsonObject() ? r.getAsJsonObject("account") : null;
-        if (account != null && account.has("username")) {
-            d.username = account.get("username").getAsString();
+        if (account != null) {
+            d.username = string(account, "username");
+            d.accountType = string(account, "type");
+            d.uuid = string(account, "unique_id");
+        }
+        JsonObject clan = r.has("clan") && r.get("clan").isJsonObject() ? r.getAsJsonObject("clan") : null;
+        if (clan != null) {
+            d.clanTag = string(clan, "tag");
+            d.clanColor = color(string(clan, "tag_color"), d.clanColor);
+        }
+        d.firstLogin = longValue(r, "first_login");
+        d.lastLogin = longValue(r, "last_login");
+        JsonObject friends = r.has("friends") && r.get("friends").isJsonObject() ? r.getAsJsonObject("friends") : null;
+        if (friends != null) {
+            d.friends = integer(friends, "count");
         }
         JsonObject tag = r.has("rank_tag") && r.get("rank_tag").isJsonObject() ? r.getAsJsonObject("rank_tag") : null;
         if (tag != null && tag.has("name")) {
             d.rank = tag.get("name").getAsString();
-            if (tag.has("color")) {
-                try {
-                    d.rankColor = Integer.parseInt(tag.get("color").getAsString().replace("#", ""), 16);
-                } catch (NumberFormatException ignored) {
-                    // mantém a cor padrão
-                }
-            }
+            d.rankColor = color(string(tag, "color"), d.rankColor);
         }
         d.online = bool(r, "connected");
         return d;
+    }
+
+    private static String string(JsonObject o, String key) {
+        JsonElement e = o.get(key);
+        return e != null && e.isJsonPrimitive() ? e.getAsString() : null;
+    }
+
+    private static long longValue(JsonObject o, String key) {
+        JsonElement e = o.get(key);
+        return e != null && e.isJsonPrimitive() && e.getAsJsonPrimitive().isNumber() ? e.getAsLong() : 0;
+    }
+
+    private static int color(String hex, int fallback) {
+        if (hex == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(hex.replace("#", ""), 16);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     private static boolean bool(JsonObject o, String key) {

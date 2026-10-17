@@ -11,6 +11,14 @@ public final class PlayerData {
     /** Cor da tag do rank (RGB), ex.: 0xAA00AA para Mod. */
     public int rankColor = 0xAAAAAA;
     public boolean online;
+    /** "premium" (original) ou "cracked" (pirata). */
+    public String accountType;
+    public String uuid;
+    public String clanTag;
+    public int clanColor = 0xAAAAAA;
+    public long firstLogin;
+    public long lastLogin;
+    public int friends = -1;
     public boolean banned;
     public int banBlacklistCount;
     public int banCount;

@@ -1,6 +1,10 @@
 package com.nikiils.mushinfo.gui;
 
+import com.nikiils.mushinfo.Settings;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Gui;
+import net.minecraft.client.gui.ScaledResolution;
+import net.minecraft.util.ResourceLocation;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.WorldRenderer;
@@ -18,9 +22,6 @@ final class RenderUtil {
     private static final float[][] BLUR_OFFSETS = buildOffsets();
     /** Margem copiada em volta do painel para o blur ter o que espalhar nas bordas. */
     private static final int MARGIN = 8;
-
-    /** Liga/desliga o blur (".info blur"), para PCs mais fracos. */
-    static boolean blurEnabled = true;
 
     private static int tex = -1;
     private static int texW;
@@ -74,7 +75,7 @@ final class RenderUtil {
      * escala do painel na GUI, usadas para achar os pixels reais.
      */
     static void blur(float w, float h, float r, float ox, float oy, float scale, int sf) {
-        if (!blurEnabled) {
+        if (!Settings.blur) {
             return;
         }
         Minecraft mc = Minecraft.getMinecraft();
@@ -166,5 +167,32 @@ final class RenderUtil {
         GlStateManager.enableTexture2D();
         GlStateManager.enableAlpha();
         GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+    }
+
+    /** Recorta o desenho a um retângulo da GUI (para listas com rolagem). */
+    static void scissor(float x, float y, float w, float h) {
+        Minecraft mc = Minecraft.getMinecraft();
+        int sf = new ScaledResolution(mc).getScaleFactor();
+        GL11.glEnable(GL11.GL_SCISSOR_TEST);
+        GL11.glScissor((int) (x * sf), (int) (mc.displayHeight - (y + h) * sf), Math.max(0, (int) (w * sf)), Math.max(0, (int) (h * sf)));
+    }
+
+    static void endScissor() {
+        GL11.glDisable(GL11.GL_SCISSOR_TEST);
+    }
+
+    /** Rosto da skin (com a camada do chapéu). */
+    static void drawHead(ResourceLocation skin, int x, int y, int size) {
+        Minecraft.getMinecraft().getTextureManager().bindTexture(skin);
+        GlStateManager.enableTexture2D();
+        GlStateManager.enableBlend();
+        GlStateManager.tryBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ZERO);
+        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+        Gui.drawScaledCustomSizeModalRect(x, y, 8, 8, 8, 8, size, size, 64, 64);
+        Gui.drawScaledCustomSizeModalRect(x, y, 40, 8, 8, 8, size, size, 64, 64);
+    }
+
+    static boolean inside(int mx, int my, float x, float y, float w, float h) {
+        return mx >= x && mx < x + w && my >= y && my < y + h;
     }
 }

@@ -1,8 +1,8 @@
 package com.nikiils.mushinfo.gui;
 
 import com.nikiils.mushinfo.NameResolver;
+import com.nikiils.mushinfo.Settings;
 import com.nikiils.mushinfo.Tracker;
-import com.nikiils.mushinfo.api.MushApi;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiChat;
 import net.minecraft.util.ChatComponentText;
@@ -22,7 +22,7 @@ import java.util.List;
  */
 public class ChatInterceptor {
 
-    private static final String PREFIX = "§8[§bMushInfo§8] §r";
+    private static final String PREFIX = "§8[§eMush§bInfo§8] §r";
 
     @SubscribeEvent
     public void onGuiOpen(GuiOpenEvent event) {
@@ -47,33 +47,28 @@ public class ChatInterceptor {
         String[] args = msg.split("\\s+");
         if (args.length < 2) {
             Collection<String> names = Tracker.names();
-            send("§7Uso: §f.info <nick>§7 (de novo para remover), §f.info clear§7, §f.info blur");
-            send("§7Monitorando: §f" + (names.isEmpty() ? "ninguém" : String.join(", ", names)));
+            send("§7Aperte §fRShift§7 para abrir a GUI. §f.info <nick>§7 abre direto no jogador.");
+            send("§f.info clear§7 remove todos os cards, §f.info blur§7 liga/desliga o blur.");
+            send("§7Cards ativos: §f" + (names.isEmpty() ? "nenhum" : String.join(", ", names)));
             return true;
         }
         String query = args[1];
         if (query.equalsIgnoreCase("clear")) {
             Tracker.clear();
-            send("\u00a7eLista de monitorados limpa.");
+            send("\u00a7eTodos os cards removidos.");
             return true;
         }
         if (query.equalsIgnoreCase("blur")) {
-            RenderUtil.blurEnabled = !RenderUtil.blurEnabled;
-            send(RenderUtil.blurEnabled ? "\u00a7aBlur ligado." : "\u00a7eBlur desligado (mais FPS).");
+            Settings.blur = !Settings.blur;
+            Settings.save();
+            send(Settings.blur ? "\u00a7aBlur ligado." : "\u00a7eBlur desligado (mais FPS).");
             return true;
         }
         if (!query.matches("[A-Za-z0-9_]{1,16}")) {
             send("\u00a7cNick inválido: " + query);
             return true;
         }
-        String name = resolve(query);
-        if (Tracker.toggle(name)) {
-            MushApi.invalidate(name);
-            MushApi.get(name);
-            send("\u00a7aMostrando informações de \u00a7f" + name + "\u00a7a.");
-        } else {
-            send("\u00a7eParou de mostrar \u00a7f" + name + "\u00a7e.");
-        }
+        MushGui.requestOpen(resolve(query));
         return true;
     }
 
@@ -98,7 +93,7 @@ public class ChatInterceptor {
             }
         }
         if (online.isEmpty()) {
-            send("\u00a77Ninguém online com \u00a7f" + query + "\u00a77, buscando esse nick exato na API.");
+            send("\u00a77Ninguém online com \u00a7f" + query + "\u00a77, buscando esse nick exato.");
             return query;
         }
         if (online.size() > 1) {
