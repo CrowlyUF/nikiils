@@ -1,0 +1,12 @@
+[
+  {
+    "modid": "${modid}",
+    "name": "Rise",
+    "description": "Rise 6 client as a Forge 1.8.9 mod.",
+    "version": "${version}",
+    "mcversion": "${mcversion}",
+    "url": "https://github.com/fmcpe/OpenRise",
+    "authorList": ["Alan", "Rotel", "The_Bi11iona1re", "HomelessSolutions"],
+    "credits": "Original client by the Rise team; open-sourced as OpenRise."
+  }
+]
