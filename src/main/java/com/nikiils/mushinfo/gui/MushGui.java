@@ -47,19 +47,27 @@ import java.util.UUID;
 public class MushGui extends GuiScreen {
 
     // ---------------------------------------------------------------- cores
-    private static final int WINDOW = 0xD8101014;
-    private static final int PANEL = 0x50000000;
-    private static final int CELL = 0x1CFFFFFF;
-    private static final int HOVER = 0x14FFFFFF;
+    private static final int WINDOW = 0xF20B0C10;
+    private static final int WINDOW_EDGE = 0xFF22242D;
+    private static final int PANEL = 0xFF101116;
+    private static final int PANEL_EDGE = 0xFF1B1D24;
+    private static final int CELL = 0xFF15161C;
+    private static final int CELL_EDGE = 0xFF20222A;
+    private static final int HOVER = 0xFF1C1E27;
+    private static final int SELECTED = 0xFF1A1E29;
     private static final int ACCENT = 0xFF4FC3F7;
-    private static final int ACCENT_BG = 0x404FC3F7;
-    private static final int MUTED = 0xFF8C8C96;
+    private static final int ACCENT_DARK = 0xFF2B86B0;
+    private static final int ACCENT_BG = 0x2A4FC3F7;
+    private static final int TEXT = 0xFFE9EAEE;
+    private static final int MUTED = 0xFF7C7F8C;
     private static final int RED = 0xFFFF5555;
     private static final int ORANGE = 0xFFFFAA33;
     private static final int GREEN = 0xFF55E07A;
+    private static final int OPEN_MS = 260;
+    private static final int CLOSE_MS = 170;
 
     private static final int ROW_H = 24;
-    private static final int HEADER_H = 26;
+    private static final int HEADER_H = 32;
     private static final int DETAIL_HEADER_H = 50;
     private static final int TABS_H = 24;
     private static final String[] TABS = {"Infos", "Alertas", "Mensagens"};
@@ -95,6 +103,14 @@ public class MushGui extends GuiScreen {
     private float pressScroll;
     private boolean dragMoved;
     private long openedAt;
+    /** Animações de hover/estado por elemento (0..1), suavizadas pelo tempo entre frames. */
+    private final Map<String, Float> anims = new java.util.HashMap<String, Float>();
+    private long lastFrame;
+    private float dt;
+    private boolean closing;
+    private long closeStart;
+    private long viewChangedAt, tabChangedAt;
+    private float viewX = -1, viewW;
 
     private final List<Button> buttons = new ArrayList<Button>();
 
@@ -333,167 +349,283 @@ public class MushGui extends GuiScreen {
 
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        long now = System.currentTimeMillis();
+        dt = lastFrame == 0 ? 0 : Math.min(0.1F, (now - lastFrame) / 1000.0F);
+        lastFrame = now;
+        if (closing && now - closeStart >= CLOSE_MS) {
+            RenderUtil.globalAlpha = 1.0F;
+            mc.displayGuiScreen(null);
+            return;
+        }
+        // p: 0 = fechado, 1 = aberto. Abre com ease-out, fecha com ease-in.
+        float p = closing ? 1 - easeIn((now - closeStart) / (float) CLOSE_MS) : easeOut((now - openedAt) / (float) OPEN_MS);
+
         rebuildEntries();
         buttons.clear();
         ScaledResolution sr = new ScaledResolution(mc);
         int sf = sr.getScaleFactor();
-        long now = System.currentTimeMillis();
-        float t = Math.min(1.0F, (now - openedAt) / 160.0F);
-        float ease = 1 - (1 - t) * (1 - t) * (1 - t);
 
         listScroll += (listTarget - listScroll) * 0.35F;
         detScroll += (detTarget - detScroll) * 0.35F;
 
         GlStateManager.disableDepth();
         GlStateManager.disableCull();
-        RenderUtil.rect(0, 0, width, height, ((int) (0x50 * ease)) << 24);
+        // Fundo escurecido com vinheta (bordas mais escuras que o centro).
+        RenderUtil.rect(0, 0, width, height, ((int) (0x96 * p)) << 24);
+        int edge = ((int) (0x80 * p)) << 24;
+        float vw = width * 0.22F, vh = height * 0.22F;
+        RenderUtil.gradientH(0, 0, vw, height, edge, 0);
+        RenderUtil.gradientH(width - vw, 0, vw, height, 0, edge);
+        RenderUtil.gradient(0, 0, width, vh, edge, 0);
+        RenderUtil.gradient(0, height - vh, width, vh, 0, edge);
 
         GlStateManager.pushMatrix();
-        float scale = 0.94F + 0.06F * ease;
-        GlStateManager.translate(width / 2.0F, height / 2.0F, 0);
+        float scale = 0.92F + 0.08F * p;
+        GlStateManager.translate(width / 2.0F, height / 2.0F + (1 - p) * 14, 0);
         GlStateManager.scale(scale, scale, 1);
         GlStateManager.translate(-width / 2.0F, -height / 2.0F, 0);
+        RenderUtil.globalAlpha = p;
 
-        if (t >= 1.0F) {
+        RenderUtil.shadow(x0, y0, w, h, 12, 14, 0xD0);
+        if (p >= 1.0F) {
             GlStateManager.pushMatrix();
             GlStateManager.translate(x0, y0, 0);
-            RenderUtil.blur(w, h, 10, x0, y0, 1.0F, sf);
+            RenderUtil.blur(w, h, 12, x0, y0, 1.0F, sf);
             GlStateManager.popMatrix();
         }
-        RenderUtil.roundedRect(x0, y0, w, h, 10, WINDOW);
-        RenderUtil.roundedOutline(x0, y0, w, h, 10, 0x20FFFFFF);
+        RenderUtil.roundedRect(x0, y0, w, h, 12, WINDOW);
+        RenderUtil.roundedOutline(x0, y0, w, h, 12, WINDOW_EDGE);
+        RenderUtil.rect(x0 + 10, y0 + HEADER_H - 5, w - 20, 1, PANEL_EDGE);
 
         drawHeader(mouseX, mouseY);
+        // Troca entre Jogadores/Checks: o conteúdo entra com fade e sobe um pouco.
+        float c = easeOut((now - viewChangedAt) / 200.0F);
+        RenderUtil.globalAlpha = p * c;
+        GlStateManager.pushMatrix();
+        GlStateManager.translate(0, (1 - c) * 6, 0);
         if (view == 0) {
             drawList(mouseX, mouseY, now);
             drawDetail(mouseX, mouseY, now);
         } else {
             drawChecks(mouseX, mouseY);
         }
+        GlStateManager.popMatrix();
 
+        RenderUtil.globalAlpha = 1.0F;
         GlStateManager.popMatrix();
         GlStateManager.enableCull();
         GlStateManager.enableDepth();
     }
 
-    private void drawHeader(int mx, int my) {
-        UiFont fr = UiFont.get();
-        fr.drawStringWithShadow("§e§lMush§b§lInfo", x0 + 12, y0 + 9, 0xFFFFFFFF);
+    private float anim(String key, boolean on, float speed) {
+        Float v = anims.get(key);
+        float target = on ? 1 : 0;
+        float cur = v == null ? target : v;
+        cur += (target - cur) * Math.min(1, dt * speed);
+        anims.put(key, cur);
+        return cur;
+    }
 
-        float bx = x0 + w - 10;
-        bx -= 12;
-        final float closeX = bx;
-        boolean hoverClose = RenderUtil.inside(mx, my, closeX, y0 + 6, 12, 12);
-        fr.drawStringWithShadow("\u00d7", closeX + 2, y0 + 8, hoverClose ? RED : MUTED);
-        buttons.add(new Button(closeX, y0 + 6, 12, 12, () -> mc.displayGuiScreen(null)));
+    private static float easeOut(float t) {
+        t = Math.max(0, Math.min(1, t));
+        return 1 - (1 - t) * (1 - t) * (1 - t);
+    }
 
-        // Janela estreita: rótulos curtos para não cobrir o título.
-        boolean compact = w < fr.getStringWidth("MushInfo  Jogadores  Checks  Blur  Alertas no chat  Experimentais  X") + 110;
-        bx = toggle(mx, my, bx - 6, compact ? "Exp." : "Experimentais", Settings.experimentalAlerts, () -> {
-            Settings.experimentalAlerts = !Settings.experimentalAlerts;
-            Settings.save();
-        });
-        bx = toggle(mx, my, bx - 4, compact ? "Chat" : "Alertas no chat", Settings.chatAlerts, () -> {
-            Settings.chatAlerts = !Settings.chatAlerts;
-            Settings.save();
-        });
-        bx = toggle(mx, my, bx - 4, "Blur", Settings.blur, () -> {
-            Settings.blur = !Settings.blur;
-            Settings.save();
-        });
-        // Abas principais logo depois do título.
-        float tx = x0 + 22 + fr.getStringWidth("\u00a7lMushInfo");
-        String[] views = {"Jogadores", "Checks"};
-        for (int i = 0; i < views.length; i++) {
-            final int index = i;
-            float vw = fr.getStringWidth(views[i]) + 14;
-            boolean active = view == i;
-            boolean hover = RenderUtil.inside(mx, my, tx, y0 + 6, vw, 14);
-            RenderUtil.roundedRect(tx, y0 + 6, vw, 14, 7, active ? ACCENT_BG : (hover ? 0x30FFFFFF : 0));
-            if (active) {
-                RenderUtil.roundedOutline(tx, y0 + 6, vw, 14, 7, ACCENT);
-            }
-            fr.drawStringWithShadow(views[i], tx + 7, y0 + 9, active ? 0xFFFFFFFF : MUTED);
-            buttons.add(new Button(tx, y0 + 6, vw, 14, () -> {
-                view = index;
-                drag = 0;
-            }));
-            tx += vw + 4;
+    private static float easeIn(float t) {
+        t = Math.max(0, Math.min(1, t));
+        return t * t * t;
+    }
+
+    /** Fecha com animação (a GUI some de verdade quando a animação termina). */
+    private void close() {
+        if (!closing) {
+            closing = true;
+            closeStart = System.currentTimeMillis();
         }
     }
 
-    /** Botão liga/desliga terminando em {@code right}. Retorna a borda esquerda. */
+    /** Botão padrão: fundo escuro com borda, hover suave; {@code active} = preenchido com a cor de destaque. */
+    private void button(String key, float x, float y, float bw, float bh, String label, boolean active,
+                        int mx, int my, Runnable action) {
+        UiFont fr = UiFont.get();
+        boolean hover = !closing && RenderUtil.inside(mx, my, x, y, bw, bh);
+        float hv = anim("btn:" + key, hover, 14);
+        float on = anim("btnOn:" + key, active, 12);
+        int fill = RenderUtil.mix(RenderUtil.mix(CELL, HOVER, hv), RenderUtil.mix(ACCENT_DARK, 0xFF3497C4, hv), on);
+        int border = RenderUtil.mix(RenderUtil.mix(CELL_EDGE, 0xFF3A3D4A, hv), ACCENT, on);
+        RenderUtil.roundedRect(x, y, bw, bh, 6, fill);
+        RenderUtil.roundedOutline(x, y, bw, bh, 6, border);
+        fr.drawStringWithShadow(label, x + (bw - fr.getStringWidth(label)) / 2.0F, y + (bh - 8) / 2.0F,
+                RenderUtil.mix(TEXT, 0xFFFFFFFF, on));
+        buttons.add(new Button(x, y, bw, bh, action));
+    }
+
+    private void drawHeader(int mx, int my) {
+        UiFont fr = UiFont.get();
+        float cy = y0 + (HEADER_H - 4) / 2.0F; // centro vertical do cabeçalho
+        fr.drawStringWithShadow("\u00a7e\u00a7lMush\u00a7b\u00a7lInfo", x0 + 14, cy - 4, 0xFFFFFFFF);
+
+        // Fechar: botão redondo que fica vermelho no hover.
+        float closeX = x0 + w - 20;
+        boolean hoverClose = !closing && RenderUtil.inside(mx, my, closeX - 8, cy - 8, 16, 16);
+        float hc = anim("close", hoverClose, 14);
+        RenderUtil.circle(closeX, cy, 7.5F, RenderUtil.mix(CELL, 0xFFD94444, hc));
+        int xColor = RenderUtil.mix(MUTED, 0xFFFFFFFF, hc);
+        RenderUtil.line(closeX - 2.8F, cy - 2.8F, closeX + 2.8F, cy + 2.8F, 1.6F, xColor);
+        RenderUtil.line(closeX - 2.8F, cy + 2.8F, closeX + 2.8F, cy - 2.8F, 1.6F, xColor);
+        buttons.add(new Button(closeX - 8, cy - 8, 16, 16, this::close));
+
+        // Abas principais: controle segmentado com destaque que desliza.
+        String[] views = {"Jogadores", "Checks"};
+        float sx = x0 + 26 + fr.getStringWidth("\u00a7lMushInfo"), sy = cy - 8.5F;
+        float total = 4;
+        float[] xs = new float[views.length], ws = new float[views.length];
+        for (int i = 0; i < views.length; i++) {
+            xs[i] = sx + total;
+            ws[i] = fr.getStringWidth(views[i]) + 16;
+            total += ws[i] + 2;
+        }
+        total += 2;
+        RenderUtil.roundedRect(sx, sy, total, 17, 8.5F, PANEL);
+        RenderUtil.roundedOutline(sx, sy, total, 17, 8.5F, PANEL_EDGE);
+        if (viewX < 0) {
+            viewX = xs[view];
+            viewW = ws[view];
+        }
+        float k = Math.min(1, dt * 16);
+        viewX += (xs[view] - viewX) * k;
+        viewW += (ws[view] - viewW) * k;
+        RenderUtil.roundedRect(viewX, sy + 2, viewW, 13, 6.5F, ACCENT_DARK);
+        for (int i = 0; i < views.length; i++) {
+            final int index = i;
+            boolean hover = !closing && RenderUtil.inside(mx, my, xs[i], sy, ws[i], 17);
+            float hv = anim("view" + i, hover || view == i, 14);
+            fr.drawStringWithShadow(views[i], xs[i] + 8, sy + 4.5F, RenderUtil.mix(MUTED, 0xFFFFFFFF, hv));
+            buttons.add(new Button(xs[i], sy, ws[i], 17, () -> {
+                if (view != index) {
+                    view = index;
+                    viewChangedAt = System.currentTimeMillis();
+                }
+                drag = 0;
+            }));
+        }
+
+        // Interruptores à direita: rótulos curtos se não couberem entre as abas e o botão de fechar.
+        float segEnd = sx + total + 14, right = closeX - 18;
+        String[] full = {"Experimentais", "Alertas no chat", "Blur"};
+        float need = 0;
+        for (String l : full) {
+            need += fr.getStringWidth(l) + 26 + 12;
+        }
+        boolean compact = need > right - segEnd;
+        float bx = right;
+        bx = toggle(mx, my, bx, compact ? "Exp." : "Experimentais", Settings.experimentalAlerts, () -> {
+            Settings.experimentalAlerts = !Settings.experimentalAlerts;
+            Settings.save();
+        }) - 12;
+        bx = toggle(mx, my, bx, compact ? "Chat" : "Alertas no chat", Settings.chatAlerts, () -> {
+            Settings.chatAlerts = !Settings.chatAlerts;
+            Settings.save();
+        }) - 12;
+        toggle(mx, my, bx, "Blur", Settings.blur, () -> {
+            Settings.blur = !Settings.blur;
+            Settings.save();
+        });
+    }
+
+    /** Rótulo + interruptor animado terminando em {@code right}. Retorna a borda esquerda. */
     private float toggle(int mx, int my, float right, String label, boolean on, Runnable action) {
         UiFont fr = UiFont.get();
-        float bw = fr.getStringWidth(label) + 18;
-        float bx = right - bw, by = y0 + 6;
-        boolean hover = RenderUtil.inside(mx, my, bx, by, bw, 14);
-        RenderUtil.roundedRect(bx, by, bw, 14, 7, on ? ACCENT_BG : (hover ? 0x30FFFFFF : CELL));
-        RenderUtil.circle(bx + 7, by + 7, 2.5F, on ? ACCENT : MUTED);
-        fr.drawStringWithShadow(label, bx + 13, by + 3, on ? 0xFFFFFFFF : 0xFFBBBBBB);
-        buttons.add(new Button(bx, by, bw, 14, action));
+        float lw = fr.getStringWidth(label);
+        float bw = lw + 6 + 20;
+        float bx = right - bw, cy = y0 + (HEADER_H - 4) / 2.0F;
+        boolean hover = !closing && RenderUtil.inside(mx, my, bx - 2, cy - 8, bw + 4, 16);
+        float hv = anim("tgH:" + label, hover, 14);
+        float a = anim("tg:" + label, on, 16);
+        fr.drawStringWithShadow(label, bx, cy - 4, RenderUtil.mix(MUTED, TEXT, Math.max(hv, a * 0.6F)));
+        float tx = bx + lw + 6, ty = cy - 5;
+        RenderUtil.roundedRect(tx, ty, 20, 10, 5, RenderUtil.mix(RenderUtil.mix(0xFF262833, 0xFF30333F, hv), ACCENT_DARK, a));
+        RenderUtil.circle(tx + 5 + 10 * a, ty + 5, 3.6F, RenderUtil.mix(0xFF9A9DA8, 0xFFFFFFFF, a));
+        buttons.add(new Button(bx - 2, cy - 8, bw + 4, 16, action));
         return bx;
     }
 
     private void drawList(int mx, int my, long now) {
         UiFont fr = UiFont.get();
-        RenderUtil.roundedRect(listX, listY, listW, listH, 7, PANEL);
+        float base = RenderUtil.globalAlpha;
+        RenderUtil.roundedRect(listX, listY, listW, listH, 8, PANEL);
+        RenderUtil.roundedOutline(listX, listY, listW, listH, 8, PANEL_EDGE);
 
         // Busca
-        RenderUtil.roundedRect(listX + 4, listY + 4, listW - 8, 15, 5, search.isFocused() ? 0x30FFFFFF : CELL);
+        float sh = anim("search", search.isFocused(), 12);
+        RenderUtil.roundedRect(listX + 5, listY + 5, listW - 10, 16, 6, RenderUtil.mix(CELL, HOVER, sh));
+        RenderUtil.roundedOutline(listX + 5, listY + 5, listW - 10, 16, 6, RenderUtil.mix(CELL_EDGE, ACCENT, sh * 0.8F));
         if (search.getText().isEmpty() && !search.isFocused()) {
-            fr.drawStringWithShadow("Buscar jogador... \u00a78(" + entries.size() + ")", listX + 8, listY + 7, 0xFF707078);
+            fr.drawStringWithShadow("Buscar jogador... \u00a78(" + entries.size() + ")", listX + 11, listY + 9, 0xFF62656F);
         }
         String typed = search.getText();
         boolean caret = search.isFocused() && (System.currentTimeMillis() / 500) % 2 == 0;
-        fr.drawStringWithShadow(typed + (caret ? "\u00a77|" : ""), listX + 8, listY + 7, 0xFFFFFFFF);
+        fr.drawStringWithShadow(typed + (caret ? "\u00a77|" : ""), listX + 11, listY + 9, TEXT);
 
-        int top = listY + 23, viewH = listH - 27;
+        int top = listY + 26, viewH = listH - 30;
         listContentH = entries.size() * ROW_H;
         clampList(viewH);
 
         RenderUtil.scissor(listX, top, listW, viewH);
         float y = top - listScroll;
+        int index = 0;
         for (Entry e : entries) {
+            int i = index++;
             if (y + ROW_H < top || y > top + viewH) {
                 y += ROW_H;
                 continue;
             }
+            // Ao abrir, as linhas entram uma depois da outra.
+            float rp = easeOut((now - openedAt - i * 22) / 240.0F);
+            RenderUtil.globalAlpha = base * rp;
+            float ox = (1 - rp) * 14;
+
             boolean sel = e.name.equalsIgnoreCase(selected);
-            boolean hover = drag == 0 && RenderUtil.inside(mx, my, listX + 3, y, listW - 9, ROW_H - 2) && my >= top && my < top + viewH;
+            boolean hover = drag == 0 && !closing && RenderUtil.inside(mx, my, listX + 4, y, listW - 11, ROW_H - 2)
+                    && my >= top && my < top + viewH;
+            float hv = anim("row:" + e.name, hover, 14);
             if (sel) {
-                RenderUtil.roundedRect(listX + 3, y + 1, listW - 9, ROW_H - 2, 5, ACCENT_BG);
-            } else if (hover) {
-                RenderUtil.roundedRect(listX + 3, y + 1, listW - 9, ROW_H - 2, 5, HOVER);
+                RenderUtil.roundedRect(listX + 4 + ox, y + 1, listW - 11, ROW_H - 2, 6, SELECTED);
+                RenderUtil.roundedOutline(listX + 4 + ox, y + 1, listW - 11, ROW_H - 2, 6, 0xFF2A3446);
+                RenderUtil.roundedRect(listX + 4 + ox, y + 6, 2.5F, ROW_H - 12, 1.25F, ACCENT);
+            } else if (hv > 0.01F) {
+                RenderUtil.roundedRect(listX + 4 + ox, y + 1, listW - 11, ROW_H - 2, 6, RenderUtil.mix(HOVER & 0x00FFFFFF, HOVER, hv));
             }
-            RenderUtil.drawHead(skin(e), listX + 7, (int) y + 4, 16);
+            RenderUtil.roundedRect(listX + 10 + ox, y + 3, 18, 18, 3, 0xFF07080B);
+            RenderUtil.drawHead(skin(e), (int) (listX + 11 + ox), (int) y + 4, 16);
 
             PlayerStats s = PlayerChecks.INSTANCE.peek(e.name);
             boolean active = s != null && s.hasActiveAlert(now);
-            fr.drawStringWithShadow(e.name, listX + 28, y + 4, active ? 0xFFFF7777 : 0xFFFFFFFF);
+            fr.drawStringWithShadow(e.name, listX + 33 + ox, y + 4, active ? 0xFFFF7A7A : TEXT);
             int acc = account(e);
-            String accText = acc == 1 ? "§aOriginal" : acc == 2 ? "§7Pirata" : "§8?";
-            small(accText + (e.entity == null ? " §8· longe" : ""), listX + 28, y + 14, 0xFFFFFFFF);
+            String accText = acc == 1 ? "\u00a7aOriginal" : acc == 2 ? "\u00a77Pirata" : "\u00a78?";
+            small(accText + (e.entity == null ? " \u00a78\u00b7 longe" : ""), listX + 33 + ox, y + 14, 0xFFFFFFFF);
 
-            float rx = listX + listW - 10;
+            float rx = listX + listW - 12 + ox;
             int flags = s != null ? s.totalFlags() : 0;
             if (flags > 0) {
                 String n = String.valueOf(flags);
-                float bw = Math.max(12, fr.getStringWidth(n) + 6);
+                float bw = Math.max(13, fr.getStringWidth(n) + 7);
                 rx -= bw;
-                RenderUtil.roundedRect(rx, y + 6, bw, 11, 5.5F, active ? 0xC0E03030 : 0x80A06020);
+                RenderUtil.roundedRect(rx, y + 6, bw, 12, 6, active ? 0xFFC93434 : 0xFF7A5222);
                 fr.drawStringWithShadow(n, rx + (bw - fr.getStringWidth(n)) / 2.0F, y + 8, 0xFFFFFFFF);
                 rx -= 3;
             }
             if (Tracker.isTracked(e.name)) {
-                rx -= 9;
-                RenderUtil.roundedRect(rx, y + 6, 9, 11, 3, ACCENT_BG);
-                small("§bC", rx + 2.5F, y + 8.5F, 0xFFFFFFFF);
+                rx -= 12;
+                RenderUtil.roundedRect(rx, y + 6, 12, 12, 6, ACCENT_DARK);
+                small("C", rx + 4, y + 9, 0xFFFFFFFF);
             }
             y += ROW_H;
         }
+        RenderUtil.globalAlpha = base;
         if (entries.isEmpty()) {
-            fr.drawStringWithShadow("Ninguém encontrado", listX + 8, top + 6, MUTED);
+            fr.drawStringWithShadow("Ningu\u00e9m encontrado", listX + 10, top + 6, MUTED);
         }
         RenderUtil.endScissor();
         scrollbar(listX + listW - 5, top, viewH, listScroll, listContentH, drag == 3);
@@ -501,7 +633,8 @@ public class MushGui extends GuiScreen {
 
     private void drawDetail(int mx, int my, long now) {
         UiFont fr = UiFont.get();
-        RenderUtil.roundedRect(detX, detY, detW, detH, 7, PANEL);
+        RenderUtil.roundedRect(detX, detY, detW, detH, 8, PANEL);
+        RenderUtil.roundedOutline(detX, detY, detW, detH, 8, PANEL_EDGE);
         if (selected == null) {
             fr.drawStringWithShadow("Selecione um jogador", detX + 10, detY + 10, MUTED);
             return;
@@ -538,28 +671,16 @@ public class MushGui extends GuiScreen {
 
         // Botões: Card info e Copiar nick
         boolean tracked = Tracker.isTracked(e.name);
-        String cardLabel = tracked ? "Card info  §aON" : "Card info  §7OFF";
-        float cw = fr.getStringWidth(cardLabel) + 14, cx = detX + detW - cw - 8, cy = detY + 8;
-        boolean hc = RenderUtil.inside(mx, my, cx, cy, cw, 16);
-        RenderUtil.roundedRect(cx, cy, cw, 16, 6, tracked ? ACCENT_BG : (hc ? 0x30FFFFFF : CELL));
-        if (tracked) {
-            RenderUtil.roundedOutline(cx, cy, cw, 16, 6, ACCENT);
-        }
-        fr.drawStringWithShadow(cardLabel, cx + 7, cy + 4, 0xFFFFFFFF);
         final String name = e.name;
-        buttons.add(new Button(cx, cy, cw, 16, () -> {
+        float bw = 84, bx = detX + detW - bw - 10;
+        button("card", bx, detY + 9, bw, 18, tracked ? "Card ativo" : "Card info", tracked, mx, my, () -> {
             if (Tracker.toggle(name)) {
                 MushApi.get(name);
             }
-        }));
-        String copy = "Copiar nick";
-        float kw = fr.getStringWidth(copy) + 12, kx = detX + detW - kw - 8, ky = cy + 20;
-        boolean hk = RenderUtil.inside(mx, my, kx, ky, kw, 14);
-        RenderUtil.roundedRect(kx, ky, kw, 14, 5, hk ? 0x30FFFFFF : CELL);
-        fr.drawStringWithShadow(copy, kx + 6, ky + 3, 0xFFDDDDDD);
-        buttons.add(new Button(kx, ky, kw, 14, () -> setClipboardString(name)));
+        });
+        button("copy", bx, detY + 30, bw, 15, "Copiar nick", false, mx, my, () -> setClipboardString(name));
 
-        RenderUtil.rect(detX + 8, detY + DETAIL_HEADER_H - 1, detW - 16, 1, 0x20FFFFFF);
+        RenderUtil.rect(detX + 10, detY + DETAIL_HEADER_H - 1, detW - 20, 1, PANEL_EDGE);
 
         drawTabs(mx, my, e.name, s, now);
 
@@ -567,7 +688,10 @@ public class MushGui extends GuiScreen {
         int top = contentTop(), viewH = contentViewH();
         clampDetail(viewH);
         RenderUtil.scissor(detX, top, detW, viewH);
-        float y = top + 6 - detScroll;
+        float tc = easeOut((now - tabChangedAt) / 180.0F);
+        float baseAlpha = RenderUtil.globalAlpha;
+        RenderUtil.globalAlpha = baseAlpha * tc;
+        float y = top + 6 - detScroll + (1 - tc) * 6;
         float start = y;
         if (tab == 0) {
             y = drawInfoGrid(e, d, s, y, now);
@@ -578,38 +702,44 @@ public class MushGui extends GuiScreen {
             y = drawChat(e.name, y, now);
         }
         detContentH = (int) (y - start) + 10;
+        RenderUtil.globalAlpha = baseAlpha;
         RenderUtil.endScissor();
         scrollbar(detX + detW - 5, top, viewH, detScroll, detContentH, drag == 4);
     }
 
     // ================================================================ aba Checks
 
-    private static final int CHECK_H = 30;
+    private static final int CHECK_H = 32;
 
     /** Liga/desliga cada check. Desligado = não analisa, não conta e não avisa. */
     private void drawChecks(int mx, int my) {
         UiFont fr = UiFont.get();
+        long now = System.currentTimeMillis();
+        float base = RenderUtil.globalAlpha;
         float ax = listX, ay = listY, aw = w - 16, ah = listH;
-        RenderUtil.roundedRect(ax, ay, aw, ah, 7, PANEL);
-        fr.drawStringWithShadow("Escolha quais checks ficam ligados", ax + 10, ay + 8, 0xFFFFFFFF);
-        small("Desligado = n\u00e3o analisa, n\u00e3o conta alerta e n\u00e3o avisa no chat.", ax + 10, ay + 19, MUTED);
+        RenderUtil.roundedRect(ax, ay, aw, ah, 8, PANEL);
+        RenderUtil.roundedOutline(ax, ay, aw, ah, 8, PANEL_EDGE);
+        fr.drawStringWithShadow("\u00a7lChecks", ax + 12, ay + 9, TEXT);
+        small("Desligado = n\u00e3o analisa, n\u00e3o conta alerta e n\u00e3o avisa no chat.", ax + 12, ay + 20, MUTED);
 
-        float bx = ax + aw - 10;
-        bx = pillButton(mx, my, bx, ay + 7, "S\u00f3 confi\u00e1veis", () -> {
+        float bw1 = fr.getStringWidth("S\u00f3 confi\u00e1veis") + 18, bw2 = fr.getStringWidth("Ligar todos") + 18;
+        float bx = ax + aw - 10 - bw1;
+        button("onlyReliable", bx, ay + 8, bw1, 17, "S\u00f3 confi\u00e1veis", false, mx, my, () -> {
             for (Check c : Check.values()) {
                 Settings.setEnabled(c, !c.experimental);
             }
-        }) - 4;
-        pillButton(mx, my, bx, ay + 7, "Ligar todos", () -> {
+        });
+        button("enableAll", bx - 6 - bw2, ay + 8, bw2, 17, "Ligar todos", false, mx, my, () -> {
             for (Check c : Check.values()) {
                 Settings.setEnabled(c, true);
             }
         });
+        RenderUtil.rect(ax + 10, ay + 31, aw - 20, 1, PANEL_EDGE);
 
-        int top = (int) ay + 32, viewH = (int) ah - 36;
+        int top = (int) ay + 36, viewH = (int) ah - 40;
         Check[] checks = Check.values();
         int rows = (checks.length + 1) / 2;
-        checkContentH = rows * (CHECK_H + 5);
+        checkContentH = rows * (CHECK_H + 6);
         float max = Math.max(0, checkContentH - viewH);
         checkTarget = Math.max(0, Math.min(max, checkTarget));
         checkScroll += (checkTarget - checkScroll) * 0.35F;
@@ -617,45 +747,42 @@ public class MushGui extends GuiScreen {
 
         checkCards.clear();
         RenderUtil.scissor(ax, top, aw, viewH);
-        float gap = 6, cw = (aw - 16 - gap) / 2.0F;
+        float gap = 6, cw = (aw - 18 - gap) / 2.0F;
+        long shownAt = Math.max(openedAt, viewChangedAt);
         for (int i = 0; i < checks.length; i++) {
             final Check c = checks[i];
-            float cx = ax + 8 + (i % 2) * (cw + gap);
-            float cy = top + (i / 2) * (CHECK_H + 5) - checkScroll;
+            float cx = ax + 9 + (i % 2) * (cw + gap);
+            float cy = top + (i / 2) * (CHECK_H + 6) - checkScroll;
             if (cy + CHECK_H < top || cy > top + viewH) {
                 continue;
             }
+            float rp = easeOut((now - shownAt - i * 18) / 240.0F);
+            RenderUtil.globalAlpha = base * rp;
+            cy += (1 - rp) * 8;
             boolean on = Settings.isEnabled(c);
-            boolean hover = drag == 0 && RenderUtil.inside(mx, my, cx, cy, cw, CHECK_H) && my >= top && my < top + viewH;
-            RenderUtil.roundedRect(cx, cy, cw, CHECK_H, 6, hover ? 0x2AFFFFFF : CELL);
-            fr.drawStringWithShadow("\u00a7l" + c.displayName, cx + 8, cy + 6, on ? 0xFFFFFFFF : 0xFF888890);
+            boolean hover = drag == 0 && !closing && RenderUtil.inside(mx, my, cx, cy, cw, CHECK_H) && my >= top && my < top + viewH;
+            float hv = anim("chk:" + c, hover, 14);
+            float a = anim("sw:" + c, on, 16);
+            RenderUtil.roundedRect(cx, cy, cw, CHECK_H, 7, RenderUtil.mix(CELL, HOVER, hv));
+            RenderUtil.roundedOutline(cx, cy, cw, CHECK_H, 7, RenderUtil.mix(CELL_EDGE, 0xFF33364A, hv));
+            fr.drawStringWithShadow("\u00a7l" + c.displayName, cx + 10, cy + 6, RenderUtil.mix(0xFF80838E, 0xFFFFFFFF, a));
             if (c.experimental) {
-                float ex = cx + 8 + fr.getStringWidth("\u00a7l" + c.displayName) + 5;
-                RenderUtil.roundedRect(ex, cy + 5.5F, fr.getStringWidth("exp.") * 0.75F + 6, 9, 4, 0x60A06020);
-                small("exp.", ex + 3, cy + 7.5F, 0xFFFFC080);
+                float ex = cx + 10 + fr.getStringWidth("\u00a7l" + c.displayName) + 5;
+                RenderUtil.roundedRect(ex, cy + 5.5F, fr.getStringWidth("exp.") * 0.75F + 7, 9, 4.5F, 0xFF4A3418);
+                small("exp.", ex + 3.5F, cy + 7.5F, 0xFFFFC27A);
             }
-            small(fr.trimStringToWidth(c.description, (int) ((cw - 50) / 0.75F)), cx + 8, cy + 18, on ? 0xFFAAAAAA : 0xFF66666E);
-            // Interruptor
-            float sx = cx + cw - 30, sy = cy + CHECK_H / 2.0F - 5.5F;
-            RenderUtil.roundedRect(sx, sy, 22, 11, 5.5F, on ? 0xFF2E8FB8 : 0x50FFFFFF);
-            RenderUtil.circle(on ? sx + 16.5F : sx + 5.5F, sy + 5.5F, 4, 0xFFFFFFFF);
+            small(fr.trimStringToWidth(c.description, (int) ((cw - 54) / 0.75F)), cx + 10, cy + 18,
+                    RenderUtil.mix(0xFF5E616B, 0xFFA3A6B0, a));
+            float sx = cx + cw - 34, sy = cy + CHECK_H / 2.0F - 6;
+            RenderUtil.roundedRect(sx, sy, 24, 12, 6, RenderUtil.mix(RenderUtil.mix(0xFF262833, 0xFF30333F, hv), ACCENT_DARK, a));
+            RenderUtil.circle(sx + 6 + 12 * a, sy + 6, 4.2F, RenderUtil.mix(0xFF9A9DA8, 0xFFFFFFFF, a));
             if (my >= top && my < top + viewH) {
                 checkCards.add(new Button(cx, cy, cw, CHECK_H, () -> Settings.setEnabled(c, !Settings.isEnabled(c))));
             }
         }
+        RenderUtil.globalAlpha = base;
         RenderUtil.endScissor();
         scrollbar(ax + aw - 5, top, viewH, checkScroll, checkContentH, false);
-    }
-
-    /** Botão pequeno terminando em {@code right}; retorna a borda esquerda. */
-    private float pillButton(int mx, int my, float right, float y, String label, Runnable action) {
-        UiFont fr = UiFont.get();
-        float bw = fr.getStringWidth(label) + 14, bx = right - bw;
-        boolean hover = RenderUtil.inside(mx, my, bx, y, bw, 16);
-        RenderUtil.roundedRect(bx, y, bw, 16, 6, hover ? 0x30FFFFFF : CELL);
-        fr.drawStringWithShadow(label, bx + 7, y + 4, 0xFFDDDDDD);
-        buttons.add(new Button(bx, y, bw, 16, action));
-        return bx;
     }
 
     private int contentTop() {
@@ -683,7 +810,7 @@ public class MushGui extends GuiScreen {
             boolean active = tab == i;
             boolean hover = RenderUtil.inside(mx, my, x, y, w, 16);
             if (active) {
-                RenderUtil.roundedRect(x, y, w, 16, 5, 0x24FFFFFF);
+                RenderUtil.roundedRect(x, y, w, 16, 5, SELECTED);
                 activeX = x;
                 activeW = w;
             } else if (hover) {
@@ -713,6 +840,7 @@ public class MushGui extends GuiScreen {
     private void selectTab(int index) {
         if (tab != index) {
             tab = index;
+            tabChangedAt = System.currentTimeMillis();
             detTarget = detScroll = 0;
         }
     }
@@ -754,7 +882,8 @@ public class MushGui extends GuiScreen {
         for (int i = 0; i < cells.size(); i++) {
             float cx = detX + 8 + (i % 2) * (cw + gap);
             float cy = y + (i / 2) * (ch + gap);
-            RenderUtil.roundedRect(cx, cy, cw, ch, 5, CELL);
+            RenderUtil.roundedRect(cx, cy, cw, ch, 6, CELL);
+            RenderUtil.roundedOutline(cx, cy, cw, ch, 6, CELL_EDGE);
             small(cells.get(i)[0].toUpperCase(), cx + 6, cy + 4, MUTED);
             UiFont.get().drawStringWithShadow(UiFont.get().trimStringToWidth(cells.get(i)[1], (int) cw - 10), cx + 6, cy + 13, 0xFFFFFFFF);
         }
@@ -780,7 +909,8 @@ public class MushGui extends GuiScreen {
         for (Check c : fired) {
             Flag f = s.lastFlag(c);
             boolean active = now - f.time <= PlayerStats.ACTIVE_MS;
-            RenderUtil.roundedRect(detX + 8, y - 2, detW - 16, 22, 5, active ? 0x30FF3030 : CELL);
+            RenderUtil.roundedRect(detX + 8, y - 2, detW - 16, 22, 6, active ? 0xFF2A1416 : CELL);
+            RenderUtil.roundedOutline(detX + 8, y - 2, detW - 16, 22, 6, active ? 0xFF5A2226 : CELL_EDGE);
             RenderUtil.circle(detX + 15, y + 3.5F, 2.5F, active ? RED : ORANGE);
             fr.drawStringWithShadow("§l" + c.displayName + " §r§7x" + s.count(c)
                     + (c.experimental ? " §8(experimental)" : ""), detX + 22, y, 0xFFFFFFFF);
@@ -860,7 +990,8 @@ public class MushGui extends GuiScreen {
         }
         float thumbH = Math.max(18, viewH * viewH / contentH);
         float thumbY = top + (viewH - thumbH) * (scroll / (contentH - viewH));
-        RenderUtil.roundedRect(x, thumbY, 3, thumbH, 1.5F, active ? 0xC0FFFFFF : 0x50FFFFFF);
+        RenderUtil.roundedRect(x, top, 2.5F, viewH, 1.25F, 0x10FFFFFF);
+        RenderUtil.roundedRect(x, thumbY, 2.5F, thumbH, 1.25F, active ? ACCENT : 0x60FFFFFF);
     }
 
     private void clampList(int viewH) {
@@ -879,6 +1010,9 @@ public class MushGui extends GuiScreen {
 
     @Override
     protected void mouseClicked(int mx, int my, int button) throws IOException {
+        if (closing) {
+            return;
+        }
         if (view == 0) {
             search.mouseClicked(mx, my, button);
         } else {
@@ -896,12 +1030,12 @@ public class MushGui extends GuiScreen {
             }
         }
         if (view == 1) {
-            if (RenderUtil.inside(mx, my, listX, listY + 32, w - 16, listH - 36)) {
+            if (RenderUtil.inside(mx, my, listX, listY + 36, w - 16, listH - 40)) {
                 start(5, my, checkTarget);
             }
             return;
         }
-        int listTop = listY + 23, listView = listH - 27;
+        int listTop = listY + 26, listView = listH - 30;
         int detTop = contentTop(), detView = contentViewH();
         if (RenderUtil.inside(mx, my, listX + listW - 7, listTop, 7, listView) && listContentH > listView) {
             start(3, my, listTarget);
@@ -927,7 +1061,7 @@ public class MushGui extends GuiScreen {
         if (Math.abs(dy) > 3) {
             dragMoved = true;
         }
-        int listView = listH - 27, detView = contentViewH();
+        int listView = listH - 30, detView = contentViewH();
         switch (drag) {
             case 1:
                 if (dragMoved) {
@@ -968,7 +1102,7 @@ public class MushGui extends GuiScreen {
             }
         }
         if (drag == 1 && !dragMoved) {
-            int top = listY + 23;
+            int top = listY + 26;
             int index = (int) ((my - top + listScroll) / ROW_H);
             if (index >= 0 && index < entries.size()) {
                 String name = entries.get(index).name;
@@ -1004,9 +1138,12 @@ public class MushGui extends GuiScreen {
 
     @Override
     protected void keyTyped(char c, int key) throws IOException {
+        if (closing) {
+            return;
+        }
         // A tecla de abrir também fecha, menos enquanto digita na busca.
         if (key == Keyboard.KEY_ESCAPE || (key == Opener.KEY.getKeyCode() && !search.isFocused())) {
-            mc.displayGuiScreen(null);
+            close();
             return;
         }
         if (view == 1) {
@@ -1035,7 +1172,7 @@ public class MushGui extends GuiScreen {
             if (i >= 0 && i < entries.size()) {
                 selected = entries.get(i).name;
                 detTarget = detScroll = 0;
-                float rowTop = i * ROW_H, view = listH - 27;
+                float rowTop = i * ROW_H, view = listH - 30;
                 if (rowTop < listTarget) {
                     listTarget = rowTop;
                 } else if (rowTop + ROW_H > listTarget + view) {

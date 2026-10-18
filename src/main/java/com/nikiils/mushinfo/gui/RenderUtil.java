@@ -23,6 +23,9 @@ final class RenderUtil {
     /** Margem copiada em volta do painel para o blur ter o que espalhar nas bordas. */
     private static final int MARGIN = 8;
 
+    /** Opacidade global (0-1) aplicada a tudo que é desenhado aqui e no UiFont: usada no fade da GUI. */
+    static float globalAlpha = 1.0F;
+
     private static int tex = -1;
     private static int texW;
     private static int texH;
@@ -75,7 +78,7 @@ final class RenderUtil {
      * escala do painel na GUI, usadas para achar os pixels reais.
      */
     static void blur(float w, float h, float r, float ox, float oy, float scale, int sf) {
-        if (!Settings.blur) {
+        if (!Settings.blur || globalAlpha < 0.999F) {
             return;
         }
         Minecraft mc = Minecraft.getMinecraft();
@@ -158,7 +161,8 @@ final class RenderUtil {
         GlStateManager.enableBlend();
         GlStateManager.disableAlpha();
         GlStateManager.tryBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ZERO);
-        GlStateManager.color((argb >> 16 & 255) / 255.0F, (argb >> 8 & 255) / 255.0F, (argb & 255) / 255.0F, (argb >>> 24) / 255.0F);
+        GlStateManager.color((argb >> 16 & 255) / 255.0F, (argb >> 8 & 255) / 255.0F, (argb & 255) / 255.0F,
+                (argb >>> 24) / 255.0F * globalAlpha);
         wr.begin(mode, DefaultVertexFormats.POSITION);
         for (float[] p : pts) {
             wr.pos(p[0], p[1], 0).endVertex();
@@ -187,9 +191,71 @@ final class RenderUtil {
         GlStateManager.enableTexture2D();
         GlStateManager.enableBlend();
         GlStateManager.tryBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ZERO);
-        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+        GlStateManager.color(1.0F, 1.0F, 1.0F, globalAlpha);
         Gui.drawScaledCustomSizeModalRect(x, y, 8, 8, 8, 8, size, size, 64, 64);
         Gui.drawScaledCustomSizeModalRect(x, y, 40, 8, 8, 8, size, size, 64, 64);
+    }
+
+    /** Linha com espessura em unidades da GUI (desenhada como um quad, nítida em qualquer escala). */
+    static void line(float x1, float y1, float x2, float y2, float width, int argb) {
+        float dx = x2 - x1, dy = y2 - y1, len = (float) Math.sqrt(dx * dx + dy * dy);
+        if (len == 0) {
+            return;
+        }
+        float nx = -dy / len * width / 2, ny = dx / len * width / 2;
+        draw(new float[][]{{x1 + nx, y1 + ny}, {x1 - nx, y1 - ny}, {x2 - nx, y2 - ny}, {x2 + nx, y2 + ny}}, GL11.GL_QUADS, argb);
+    }
+
+    /** Sombra suave: camadas arredondadas cada vez maiores e mais transparentes. */
+    static void shadow(float x, float y, float w, float h, float r, int size, int maxAlpha) {
+        for (int i = size; i >= 1; i--) {
+            float f = 1.0F - (float) i / (size + 1);
+            int a = (int) (maxAlpha * f * f / size * 2.2F);
+            roundedRect(x - i, y - i + 2, w + i * 2, h + i * 2, r + i, Math.min(255, a) << 24);
+        }
+    }
+
+    /** Degradê vertical (top -> bottom). */
+    static void gradient(float x, float y, float w, float h, int top, int bottom) {
+        gradientQuad(x, y, w, h, top, top, bottom, bottom);
+    }
+
+    /** Degradê horizontal (left -> right). */
+    static void gradientH(float x, float y, float w, float h, int left, int right) {
+        gradientQuad(x, y, w, h, left, right, right, left);
+    }
+
+    /** Quad com uma cor por canto: topo-esq, topo-dir, baixo-dir, baixo-esq. */
+    private static void gradientQuad(float x, float y, float w, float h, int tl, int tr, int br, int bl) {
+        Tessellator tess = Tessellator.getInstance();
+        WorldRenderer wr = tess.getWorldRenderer();
+        GlStateManager.disableTexture2D();
+        GlStateManager.enableBlend();
+        GlStateManager.disableAlpha();
+        GlStateManager.tryBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ZERO);
+        GlStateManager.shadeModel(GL11.GL_SMOOTH);
+        wr.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_COLOR);
+        vertex(wr, x, y, tl);
+        vertex(wr, x, y + h, bl);
+        vertex(wr, x + w, y + h, br);
+        vertex(wr, x + w, y, tr);
+        tess.draw();
+        GlStateManager.shadeModel(GL11.GL_FLAT);
+        GlStateManager.enableTexture2D();
+        GlStateManager.enableAlpha();
+    }
+
+    private static void vertex(WorldRenderer wr, float x, float y, int argb) {
+        wr.pos(x, y, 0).color(argb >> 16 & 255, argb >> 8 & 255, argb & 255, (int) ((argb >>> 24) * globalAlpha)).endVertex();
+    }
+
+    /** Mistura duas cores ARGB (t = 0 -> a, t = 1 -> b). */
+    static int mix(int a, int b, float t) {
+        t = Math.max(0, Math.min(1, t));
+        int aa = a >>> 24, ar = a >> 16 & 255, ag = a >> 8 & 255, ab = a & 255;
+        int ba = b >>> 24, br = b >> 16 & 255, bg = b >> 8 & 255, bb = b & 255;
+        return (int) (aa + (ba - aa) * t) << 24 | (int) (ar + (br - ar) * t) << 16
+                | (int) (ag + (bg - ag) * t) << 8 | (int) (ab + (bb - ab) * t);
     }
 
     static boolean inside(int mx, int my, float x, float y, float w, float h) {

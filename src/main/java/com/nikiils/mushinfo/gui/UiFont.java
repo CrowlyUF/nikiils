@@ -353,7 +353,7 @@ final class UiFont {
             float gw = a.w[g] * a.scale, gh = a.h[g] * a.scale;
             float gx = cx - 2 * a.scale, gy = y - a.ascentOffset * a.scale;
             float u0 = a.u[g], v0 = a.v[g], u1 = u0 + a.w[g] / a.size, v1 = v0 + a.h[g] / a.size;
-            int r = rgb >> 16 & 255, gr = rgb >> 8 & 255, b = rgb & 255, al = (int) (alpha * 255);
+            int r = rgb >> 16 & 255, gr = rgb >> 8 & 255, b = rgb & 255, al = (int) (alpha * 255 * RenderUtil.globalAlpha);
             wr.pos(gx, gy, 0).tex(u0, v0).color(r, gr, b, al).endVertex();
             wr.pos(gx, gy + gh, 0).tex(u0, v1).color(r, gr, b, al).endVertex();
             wr.pos(gx + gw, gy + gh, 0).tex(u1, v1).color(r, gr, b, al).endVertex();
