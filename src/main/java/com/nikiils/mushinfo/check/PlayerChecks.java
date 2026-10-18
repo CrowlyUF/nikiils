@@ -51,6 +51,8 @@ public final class PlayerChecks {
     private long worldChangedAt;
     /** Já vimos alguém tomar dano de queda neste mundo (minigames/lobbies sem dano de queda não contam). */
     private boolean worldHasFallDamage;
+    /** Jogadores andando acima de 0.36 bloco/tick agora (para não acusar Speed em velocidade do servidor). */
+    private int fastPlayers;
 
     private PlayerChecks() {
     }
@@ -147,6 +149,13 @@ public final class PlayerChecks {
         }
         byId.keySet().retainAll(ids);
         attributePlacements(players, now);
+        fastPlayers = 0;
+        for (EntityPlayer p : players) {
+            PlayerStats ps = get(p);
+            if (ps.movesCount() >= 20 && ps.averageSpeed(20) > 0.36) {
+                fastPlayers++;
+            }
+        }
 
         for (EntityPlayer p : players) {
             if (p.isDead || p.deathTime > 0) {
@@ -160,7 +169,9 @@ public final class PlayerChecks {
 
             boolean self = p instanceof EntityPlayerSP;
             ItemStack held = p.getHeldItem();
-            boolean exempt = now - s.lastBreakAnim < 1000L || (held != null && held.getItem() == Items.fishing_rod);
+            boolean exempt = now - s.lastBreakAnim < 1000L || held != null
+                    && (held.getItem() == Items.fishing_rod || held.getItem() instanceof ItemBlock)
+                    || s.placementsSince(now - 2000L) > 0;
             s.sampleCps(now, self, exempt);
             s.pushY(posY(p));
 
@@ -270,7 +281,8 @@ public final class PlayerChecks {
             return;
         }
         double avg = s.averageSpeed(20);
-        if (avg > 0.40 && s.maxStep(20) < 1.5 && s.groundTicks(20) >= 5) {
+        // Se 3+ jogadores estão rápidos, é o servidor dando velocidade (lobby, kit, evento).
+        if (avg > 0.42 && s.maxStep(20) < 1.5 && s.groundTicks(20) >= 5 && fastPlayers < 3) {
             s.flag(Check.SPEED, now, String.format("%.2f b/t por 1s (normal até ~0.30)", avg));
             s.clearMoves();
         }
@@ -319,12 +331,12 @@ public final class PlayerChecks {
         s.landedTicksAgo = -1;
         ItemStack boots = p.getCurrentArmor(0);
         boolean feather = boots != null && EnchantmentHelper.getEnchantmentLevel(Enchantment.featherFalling.effectId, boots) > 0;
-        if (worldHasFallDamage && s.landedFall >= 5.0 && !feather) {
-            if (now - s.lastNoFallCandidate > 60_000L) {
+        if (worldHasFallDamage && s.landedFall >= 6.0 && !feather) {
+            if (now - s.lastNoFallCandidate > 120_000L) {
                 s.noFallCandidates = 0;
             }
             s.lastNoFallCandidate = now;
-            if (++s.noFallCandidates >= 2) {
+            if (++s.noFallCandidates >= 3) {
                 s.flag(Check.NOFALL, now, String.format("caiu %.0f blocos sem dano", s.landedFall));
             }
         }
@@ -333,25 +345,38 @@ public final class PlayerChecks {
     // ================================================================ SafeWalk
 
     /**
-     * SafeWalk impede o jogador de cair de quinas sem agachar: parado (ou fazendo ponte de costas) com o
-     * centro do corpo fora do bloco, preso só pela borda da hitbox, sem agachar, por 5+ ticks, sobre um
-     * vão de 2+ blocos.
+     * SafeWalk segura o jogador na quina sem agachar. Ficar PARADO na quina é normal (dá para parar ali
+     * andando devagar); o que denuncia é COMO ele para: soltando as teclas o jogo desacelera aos poucos
+     * (~0.55x por tick), mas o SafeWalk zera o movimento na hora, exatamente na borda. Então conta
+     * quando ele vinha andando (0.1+ bloco/tick), parou seco por 2 ticks com o corpo para fora da
+     * quina, sem agachar nos últimos 6 ticks, sem parede na frente, sobre um vão de 2+ blocos.
+     * 3 paradas assim em 20 s.
      */
     private void checkSafeWalk(World world, EntityPlayer p, PlayerStats s, long now) {
+        double[] cur = s.move(0), mid = s.move(1), before = s.move(2);
+        if (cur == null || mid == null || before == null || p.isSneaking() || s.ticksSinceSneak < 6
+                || p.isRiding() || !p.onGround || cur[3] == 0 || mid[3] == 0) {
+            return;
+        }
+        double speedBefore = Math.hypot(before[0], before[1]);
+        if (speedBefore < 0.1 || Math.hypot(mid[0], mid[1]) > 0.01 || Math.hypot(cur[0], cur[1]) > 0.01) {
+            return;
+        }
         double x = posX(p), y = posY(p), z = posZ(p);
-        boolean hanging = !p.isSneaking() && !p.capabilities.isFlying && !p.isRiding()
-                && p.onGround && edgeDepth(world, x, y, z) < 0.10;
-        if (hanging) {
-            s.edgeTicks++;
-            if (p.rotationPitch > 60.0F) {
-                s.edgeLookingDown = true;
-            }
-            if (s.edgeTicks == 5) {
-                s.flag(Check.SAFEWALK, now, s.edgeLookingDown ? "ponte sem agachar" : "parado na quina");
-            }
-        } else {
-            s.edgeTicks = 0;
-            s.edgeLookingDown = false;
+        if (edgeDepth(world, x, y, z) >= 0.08) {
+            return;
+        }
+        // Bater numa parede também para seco: só vale se à frente é vazio.
+        double dx = before[0] / speedBefore, dz = before[1] / speedBefore;
+        int fx = MathHelper.floor_double(x + dx * 0.6), fz = MathHelper.floor_double(z + dz * 0.6);
+        int fy = MathHelper.floor_double(y + 0.01);
+        if (solid(world, fx, fy, fz) || solid(world, fx, fy + 1, fz) || solid(world, fx, fy - 1, fz)) {
+            return;
+        }
+        int stops = s.safeWalkStop(now);
+        if (stops >= 3) {
+            s.flag(Check.SAFEWALK, now, "parou seco na quina " + stops + "x sem agachar"
+                    + (p.rotationPitch > 60.0F ? " (fazendo ponte)" : ""));
         }
     }
 
@@ -400,7 +425,7 @@ public final class PlayerChecks {
     private void checkNoSlow(EntityPlayer p, PlayerStats s, long now) {
         boolean using = p.isUsingItem();
         s.ticksSinceStopUsing = s.wasUsing && !using ? 0 : s.ticksSinceStopUsing + 1;
-        if (!using || !p.onGround || p.isRiding() || p.isInWater()) {
+        if (!using || !p.onGround || p.isRiding() || p.isInWater() || s.ticksSinceHurt < 20) {
             s.usingTicks = 0;
             s.noSlowTicks = 0;
             s.sprintUseTicks = 0;
@@ -429,7 +454,7 @@ public final class PlayerChecks {
      */
     private void checkAutoBlock(EntityPlayer p, PlayerStats s, long now) {
         s.swingBlockTicks = p.isSwingInProgress && p.isBlocking() ? s.swingBlockTicks + 1 : 0;
-        if (s.swingBlockTicks == 15) {
+        if (s.swingBlockTicks == 60) {
             s.flag(Check.AUTOBLOCK, now, "batendo e defendendo ao mesmo tempo");
         }
     }
@@ -501,16 +526,17 @@ public final class PlayerChecks {
         int perSecond = s.placementsSince(now - 1000L);
         double speed = s.averageSpeed(5);
         double rise = s.riseOver(20);
-        if (s.forwardPlacementsSince(now - 3000L, 40.0F) >= 3) {
+        if (s.forwardPlacementsSince(now - 3000L, 30.0F) >= 3) {
             s.flag(Check.SCAFFOLD, now, "bloco embaixo olhando pra frente");
             s.clearPlacements();
-        } else if (perSecond >= 11) {
+        } else if (perSecond >= 13) {
             s.flag(Check.SCAFFOLD, now, perSecond + " blocos/s");
             s.clearPlacements();
         } else if (perSecond >= 8 && speed >= 0.26 && !p.isSneaking()) {
             s.flag(Check.SCAFFOLD, now, String.format("ponte rápida %.2f b/t", speed));
             s.clearPlacements();
-        } else if (s.underPlacementsSince(now - 1500L) >= 4 && rise >= 3.0) {
+        } else if (s.underPlacementsSince(now - 1500L) >= 4 && rise >= 3.0
+                && p.getDataWatcher().getWatchableObjectInt(7) == 0) {
             s.flag(Check.SCAFFOLD, now, String.format("Tower %.1f blocos/s", rise));
             s.clearPlacements();
         }
@@ -542,12 +568,12 @@ public final class PlayerChecks {
         float pitch = p.rotationPitch;
         float yawDelta = Math.abs(MathHelper.wrapAngleTo180_float(yaw - s.lastYaw));
         s.ticksSincePitch = pitch != s.lastPitch ? 0 : s.ticksSincePitch + 1;
-        s.yawOnlyTicks = yawDelta >= 1.0F ? s.yawOnlyTicks + 1 : 0;
+        s.yawOnlyTicks = yawDelta >= 2.0F ? s.yawOnlyTicks + 1 : 0;
         s.lastYaw = yaw;
         s.lastPitch = pitch;
 
         boolean combat = now - s.lastSwing() < 1000L;
-        if (combat && pitch > -80 && pitch < 80 && s.yawOnlyTicks == 25 && s.ticksSincePitch >= 25) {
+        if (combat && pitch > -80 && pitch < 80 && s.yawOnlyTicks == 40 && s.ticksSincePitch >= 40) {
             s.flag(Check.AIMASSIST, now, "só o yaw mexe, pitch travado");
         }
 

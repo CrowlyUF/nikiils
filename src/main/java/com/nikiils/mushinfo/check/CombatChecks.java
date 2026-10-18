@@ -162,8 +162,10 @@ final class CombatChecks {
         double[][] vh = vq.toArray(new double[0][]);
         double[][] ah = aq.toArray(new double[0][]);
 
-        // Knockback: começa a medir o empurrão na direção atacante -> vítima.
-        if (!(victim instanceof EntityPlayerSP)) {
+        // Knockback: começa a medir o empurrão na direção atacante -> vítima. Só hit corpo a corpo claro
+        // (perto e mirando), e sem fogo, que dá dano sem empurrar.
+        double hd = Math.hypot(vh[0][0] - ah[0][0], vh[0][2] - ah[0][2]);
+        if (!(victim instanceof EntityPlayerSP) && hd <= 4.5 && bestErr < 25.0F && !victim.isBurning()) {
             double dx = vh[0][0] - ah[0][0], dz = vh[0][2] - ah[0][2];
             double len = Math.hypot(dx, dz);
             if (len > 0.1 && len < 6) {

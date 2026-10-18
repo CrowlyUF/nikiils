@@ -71,6 +71,12 @@ public class MushGui extends GuiScreen {
     private static String selected;
     /** Aba aberta nos detalhes (0 Infos, 1 Alertas, 2 Mensagens); continua ao trocar de jogador. */
     private static int tab;
+    /** Tela principal: 0 = Jogadores, 1 = Checks. */
+    private static int view;
+    private float checkScroll, checkTarget;
+    private int checkContentH;
+    /** Cards de check visíveis neste frame (clique sem arrastar alterna o check). */
+    private final List<Button> checkCards = new ArrayList<Button>();
     private float tabX = -1, tabW;
     private static String pendingOpen;
     private static boolean pending;
@@ -358,8 +364,12 @@ public class MushGui extends GuiScreen {
         RenderUtil.roundedOutline(x0, y0, w, h, 10, 0x20FFFFFF);
 
         drawHeader(mouseX, mouseY);
-        drawList(mouseX, mouseY, now);
-        drawDetail(mouseX, mouseY, now);
+        if (view == 0) {
+            drawList(mouseX, mouseY, now);
+            drawDetail(mouseX, mouseY, now);
+        } else {
+            drawChecks(mouseX, mouseY);
+        }
 
         GlStateManager.popMatrix();
         GlStateManager.enableCull();
@@ -378,7 +388,7 @@ public class MushGui extends GuiScreen {
         buttons.add(new Button(closeX, y0 + 6, 12, 12, () -> mc.displayGuiScreen(null)));
 
         // Janela estreita: rótulos curtos para não cobrir o título.
-        boolean compact = w < fr.getStringWidth("MushInfo modera\u00e7\u00e3o  Blur  Alertas no chat  Experimentais  X") + 90;
+        boolean compact = w < fr.getStringWidth("MushInfo  Jogadores  Checks  Blur  Alertas no chat  Experimentais  X") + 110;
         bx = toggle(mx, my, bx - 6, compact ? "Exp." : "Experimentais", Settings.experimentalAlerts, () -> {
             Settings.experimentalAlerts = !Settings.experimentalAlerts;
             Settings.save();
@@ -391,8 +401,24 @@ public class MushGui extends GuiScreen {
             Settings.blur = !Settings.blur;
             Settings.save();
         });
-        if (bx > x0 + 20 + fr.getStringWidth("\u00a7lMushInfo modera\u00e7\u00e3o")) {
-            fr.drawStringWithShadow("modera\u00e7\u00e3o", x0 + 14 + fr.getStringWidth("\u00a7lMushInfo"), y0 + 9, MUTED);
+        // Abas principais logo depois do título.
+        float tx = x0 + 22 + fr.getStringWidth("\u00a7lMushInfo");
+        String[] views = {"Jogadores", "Checks"};
+        for (int i = 0; i < views.length; i++) {
+            final int index = i;
+            float vw = fr.getStringWidth(views[i]) + 14;
+            boolean active = view == i;
+            boolean hover = RenderUtil.inside(mx, my, tx, y0 + 6, vw, 14);
+            RenderUtil.roundedRect(tx, y0 + 6, vw, 14, 7, active ? ACCENT_BG : (hover ? 0x30FFFFFF : 0));
+            if (active) {
+                RenderUtil.roundedOutline(tx, y0 + 6, vw, 14, 7, ACCENT);
+            }
+            fr.drawStringWithShadow(views[i], tx + 7, y0 + 9, active ? 0xFFFFFFFF : MUTED);
+            buttons.add(new Button(tx, y0 + 6, vw, 14, () -> {
+                view = index;
+                drag = 0;
+            }));
+            tx += vw + 4;
         }
     }
 
@@ -554,6 +580,82 @@ public class MushGui extends GuiScreen {
         detContentH = (int) (y - start) + 10;
         RenderUtil.endScissor();
         scrollbar(detX + detW - 5, top, viewH, detScroll, detContentH, drag == 4);
+    }
+
+    // ================================================================ aba Checks
+
+    private static final int CHECK_H = 30;
+
+    /** Liga/desliga cada check. Desligado = não analisa, não conta e não avisa. */
+    private void drawChecks(int mx, int my) {
+        UiFont fr = UiFont.get();
+        float ax = listX, ay = listY, aw = w - 16, ah = listH;
+        RenderUtil.roundedRect(ax, ay, aw, ah, 7, PANEL);
+        fr.drawStringWithShadow("Escolha quais checks ficam ligados", ax + 10, ay + 8, 0xFFFFFFFF);
+        small("Desligado = n\u00e3o analisa, n\u00e3o conta alerta e n\u00e3o avisa no chat.", ax + 10, ay + 19, MUTED);
+
+        float bx = ax + aw - 10;
+        bx = pillButton(mx, my, bx, ay + 7, "S\u00f3 confi\u00e1veis", () -> {
+            for (Check c : Check.values()) {
+                Settings.setEnabled(c, !c.experimental);
+            }
+        }) - 4;
+        pillButton(mx, my, bx, ay + 7, "Ligar todos", () -> {
+            for (Check c : Check.values()) {
+                Settings.setEnabled(c, true);
+            }
+        });
+
+        int top = (int) ay + 32, viewH = (int) ah - 36;
+        Check[] checks = Check.values();
+        int rows = (checks.length + 1) / 2;
+        checkContentH = rows * (CHECK_H + 5);
+        float max = Math.max(0, checkContentH - viewH);
+        checkTarget = Math.max(0, Math.min(max, checkTarget));
+        checkScroll += (checkTarget - checkScroll) * 0.35F;
+        checkScroll = Math.max(0, Math.min(max, checkScroll));
+
+        checkCards.clear();
+        RenderUtil.scissor(ax, top, aw, viewH);
+        float gap = 6, cw = (aw - 16 - gap) / 2.0F;
+        for (int i = 0; i < checks.length; i++) {
+            final Check c = checks[i];
+            float cx = ax + 8 + (i % 2) * (cw + gap);
+            float cy = top + (i / 2) * (CHECK_H + 5) - checkScroll;
+            if (cy + CHECK_H < top || cy > top + viewH) {
+                continue;
+            }
+            boolean on = Settings.isEnabled(c);
+            boolean hover = drag == 0 && RenderUtil.inside(mx, my, cx, cy, cw, CHECK_H) && my >= top && my < top + viewH;
+            RenderUtil.roundedRect(cx, cy, cw, CHECK_H, 6, hover ? 0x2AFFFFFF : CELL);
+            fr.drawStringWithShadow("\u00a7l" + c.displayName, cx + 8, cy + 6, on ? 0xFFFFFFFF : 0xFF888890);
+            if (c.experimental) {
+                float ex = cx + 8 + fr.getStringWidth("\u00a7l" + c.displayName) + 5;
+                RenderUtil.roundedRect(ex, cy + 5.5F, fr.getStringWidth("exp.") * 0.75F + 6, 9, 4, 0x60A06020);
+                small("exp.", ex + 3, cy + 7.5F, 0xFFFFC080);
+            }
+            small(fr.trimStringToWidth(c.description, (int) ((cw - 50) / 0.75F)), cx + 8, cy + 18, on ? 0xFFAAAAAA : 0xFF66666E);
+            // Interruptor
+            float sx = cx + cw - 30, sy = cy + CHECK_H / 2.0F - 5.5F;
+            RenderUtil.roundedRect(sx, sy, 22, 11, 5.5F, on ? 0xFF2E8FB8 : 0x50FFFFFF);
+            RenderUtil.circle(on ? sx + 16.5F : sx + 5.5F, sy + 5.5F, 4, 0xFFFFFFFF);
+            if (my >= top && my < top + viewH) {
+                checkCards.add(new Button(cx, cy, cw, CHECK_H, () -> Settings.setEnabled(c, !Settings.isEnabled(c))));
+            }
+        }
+        RenderUtil.endScissor();
+        scrollbar(ax + aw - 5, top, viewH, checkScroll, checkContentH, false);
+    }
+
+    /** Botão pequeno terminando em {@code right}; retorna a borda esquerda. */
+    private float pillButton(int mx, int my, float right, float y, String label, Runnable action) {
+        UiFont fr = UiFont.get();
+        float bw = fr.getStringWidth(label) + 14, bx = right - bw;
+        boolean hover = RenderUtil.inside(mx, my, bx, y, bw, 16);
+        RenderUtil.roundedRect(bx, y, bw, 16, 6, hover ? 0x30FFFFFF : CELL);
+        fr.drawStringWithShadow(label, bx + 7, y + 4, 0xFFDDDDDD);
+        buttons.add(new Button(bx, y, bw, 16, action));
+        return bx;
     }
 
     private int contentTop() {
@@ -777,7 +879,11 @@ public class MushGui extends GuiScreen {
 
     @Override
     protected void mouseClicked(int mx, int my, int button) throws IOException {
-        search.mouseClicked(mx, my, button);
+        if (view == 0) {
+            search.mouseClicked(mx, my, button);
+        } else {
+            search.setFocused(false);
+        }
         if (button != 0) {
             return;
         }
@@ -788,6 +894,12 @@ public class MushGui extends GuiScreen {
                 b.action.run();
                 return;
             }
+        }
+        if (view == 1) {
+            if (RenderUtil.inside(mx, my, listX, listY + 32, w - 16, listH - 36)) {
+                start(5, my, checkTarget);
+            }
+            return;
         }
         int listTop = listY + 23, listView = listH - 27;
         int detTop = contentTop(), detView = contentViewH();
@@ -833,6 +945,11 @@ public class MushGui extends GuiScreen {
             case 4:
                 detTarget = detScroll = pressScroll + dy * (detContentH / (float) detView);
                 break;
+            case 5:
+                if (dragMoved) {
+                    checkTarget = checkScroll = pressScroll - dy;
+                }
+                break;
             default:
                 break;
         }
@@ -840,6 +957,16 @@ public class MushGui extends GuiScreen {
 
     @Override
     protected void mouseReleased(int mx, int my, int state) {
+        if (drag == 5 && !dragMoved) {
+            for (Button b : new ArrayList<Button>(checkCards)) {
+                if (RenderUtil.inside(mx, my, b.x, b.y, b.w, b.h)) {
+                    mc.getSoundHandler().playSound(net.minecraft.client.audio.PositionedSoundRecord.create(
+                            new ResourceLocation("gui.button.press"), 1.0F));
+                    b.action.run();
+                    break;
+                }
+            }
+        }
         if (drag == 1 && !dragMoved) {
             int top = listY + 23;
             int index = (int) ((my - top + listScroll) / ROW_H);
@@ -864,6 +991,10 @@ public class MushGui extends GuiScreen {
         int mx = Mouse.getEventX() * width / mc.displayWidth;
         int my = height - Mouse.getEventY() * height / mc.displayHeight - 1;
         int dir = wheel > 0 ? -1 : 1;
+        if (view == 1) {
+            checkTarget += dir * 36;
+            return;
+        }
         if (RenderUtil.inside(mx, my, listX, listY, listW, listH)) {
             listTarget += dir * ROW_H * 2;
         } else if (RenderUtil.inside(mx, my, detX, detY, detW, detH)) {
@@ -876,6 +1007,9 @@ public class MushGui extends GuiScreen {
         // A tecla de abrir também fecha, menos enquanto digita na busca.
         if (key == Keyboard.KEY_ESCAPE || (key == Opener.KEY.getKeyCode() && !search.isFocused())) {
             mc.displayGuiScreen(null);
+            return;
+        }
+        if (view == 1) {
             return;
         }
         if (search.isFocused()) {

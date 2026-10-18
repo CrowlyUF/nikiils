@@ -65,6 +65,11 @@ public final class BlockChecks {
     }
 
     public void onBlockChange(BlockPos pos, IBlockState newState) {
+        onBlockChange(pos, newState, false);
+    }
+
+    /** {@code bulk}: pacote com muitos blocos de uma vez (reset de mapa, plugin) — não conta como Nuker. */
+    public void onBlockChange(BlockPos pos, IBlockState newState, boolean bulk) {
         World world = Minecraft.getMinecraft().theWorld;
         if (world == null || newState == null) {
             return;
@@ -76,11 +81,11 @@ public final class BlockChecks {
         if (oldEmpty && !newEmpty) {
             PlayerChecks.INSTANCE.onBlockPlaced(pos, now);
         } else if (!oldEmpty && newState.getBlock().getMaterial() == Material.air) {
-            onBreak(world, pos, old.getBlock(), now);
+            onBreak(world, pos, old.getBlock(), now, bulk);
         }
     }
 
-    private void onBreak(World world, BlockPos pos, Block block, long now) {
+    private void onBreak(World world, BlockPos pos, Block block, long now, boolean bulk) {
         long[] anim = anims.remove(pos);
         EntityPlayer breaker = null;
         if (anim != null) {
@@ -98,28 +103,33 @@ public final class BlockChecks {
         }
 
         boolean bed = block instanceof BlockBed;
-        if (!bed && !block.isFullCube()) {
+        if (bulk || (!bed && !(block.isFullCube() && block.getMaterial().isSolid()))) {
             return;
         }
-        if (exposed(world, pos)) {
+        if (block.getBlockHardness(world, pos) <= 0 || exposed(world, pos)) {
             return;
         }
         if (breaker == null) {
             breaker = nearestBreaker(world, pos, now);
         }
-        if (breaker == null || breaker instanceof EntityPlayerSP) {
+        if (breaker == null || breaker instanceof EntityPlayerSP
+                || breaker.getDistanceSq(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) > 6.5 * 6.5) {
             return;
         }
         PlayerStats s = PlayerChecks.INSTANCE.get(breaker);
         String where = pos.getX() + " " + pos.getY() + " " + pos.getZ();
         if (bed) {
             s.flag(Check.BEDNUKER, now, "quebrou cama coberta em " + where);
-        } else {
+        } else if (s.nukerHit(now) >= 2) {
+            // Um só pode ser coincidência (bloco vizinho quebrado no mesmo instante); dois é padrão.
             s.flag(Check.NUKER, now, "quebrou bloco coberto (" + block.getLocalizedName() + ") em " + where);
         }
     }
 
-    /** Alguma face do bloco dá para algo que não é bloco inteiro (ar, água, laje...)? */
+    /**
+     * Alguma face do bloco dá para algo que não é um bloco sólido inteiro (ar, água, laje...)?
+     * Atenção: no 1.8.9 o BlockAir responde isFullCube() = true, por isso o material é checado.
+     */
     private static boolean exposed(World world, BlockPos pos) {
         for (EnumFacing f : EnumFacing.values()) {
             BlockPos n = pos.offset(f);
@@ -127,7 +137,8 @@ public final class BlockChecks {
             if (nb instanceof BlockBed) {
                 continue; // a outra metade da cama não expõe nada
             }
-            if (!nb.isFullCube()) {
+            Material m = nb.getMaterial();
+            if (m == Material.air || !m.isSolid() || !nb.isFullCube()) {
                 return true;
             }
         }

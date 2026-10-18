@@ -40,8 +40,6 @@ public final class PlayerStats {
     boolean hasPos;
     double lastX, lastY, lastZ;
     private final ArrayDeque<double[]> moves = new ArrayDeque<double[]>(); // {dx, dz, dy, onGround}
-    int edgeTicks;
-    boolean edgeLookingDown;
     int usingTicks, noSlowTicks, sprintUseTicks, ticksSinceStopUsing = 100;
     boolean wasUsing;
     int speedTicks;
@@ -70,6 +68,8 @@ public final class PlayerStats {
     private final ArrayDeque<Double> yHistory = new ArrayDeque<Double>();
     boolean newPlacement;
     private final ArrayDeque<Long> fastMines = new ArrayDeque<Long>();
+    private final ArrayDeque<Long> nukerHits = new ArrayDeque<Long>();
+    private final ArrayDeque<Long> safeWalkStops = new ArrayDeque<Long>();
 
     // ---------------------------------------------------------------- combate
     boolean lagHasPos;
@@ -90,6 +90,9 @@ public final class PlayerStats {
 
     /** Registra um disparo. Disparos do mesmo check em menos de 1 s contam como um só. */
     synchronized boolean flag(Check check, long now, String reason) {
+        if (!com.nikiils.mushinfo.Settings.isEnabled(check)) {
+            return false;
+        }
         Flag last = lastFlags.get(check);
         Flag f = new Flag(check, now, reason);
         lastFlags.put(check, f);
@@ -254,6 +257,17 @@ public final class PlayerStats {
         return n == 0 ? 0 : sum / n;
     }
 
+    /** Deslocamento de {@code ticksAgo} ticks atrás: {dx, dz, dy, noChão}, ou null. */
+    double[] move(int ticksAgo) {
+        int i = 0;
+        for (double[] m : moves) {
+            if (i++ == ticksAgo) {
+                return m;
+            }
+        }
+        return null;
+    }
+
     int movesCount() {
         return moves.size();
     }
@@ -342,10 +356,11 @@ public final class PlayerStats {
         return n;
     }
 
+    /** Blocos colocados logo embaixo do jogador com ele olhando quase reto para frente. */
     int forwardPlacementsSince(long since, float maxPitch) {
         int n = 0;
         for (double[] p : placed) {
-            if (p[0] >= since && p[1] < maxPitch) {
+            if (p[0] >= since && p[1] < maxPitch && p[2] == 1) {
                 n++;
             }
         }
@@ -374,6 +389,14 @@ public final class PlayerStats {
             return 0;
         }
         return yHistory.peekLast() - yHistory.peekFirst();
+    }
+
+    int nukerHit(long now) {
+        return count(nukerHits, now, 30_000L);
+    }
+
+    int safeWalkStop(long now) {
+        return count(safeWalkStops, now, 20_000L);
     }
 
     int fastMine(long now) {

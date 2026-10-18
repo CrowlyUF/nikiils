@@ -65,9 +65,10 @@ public class PacketListener {
                 schedule(() -> blocks().onBlockChange(pos, state));
             } else if (msg instanceof S22PacketMultiBlockChange) {
                 final S22PacketMultiBlockChange.BlockUpdateData[] changes = ((S22PacketMultiBlockChange) msg).getChangedBlocks();
+                final boolean bulk = changes.length > 4;
                 schedule(() -> {
                     for (S22PacketMultiBlockChange.BlockUpdateData d : changes) {
-                        blocks().onBlockChange(d.getPos(), d.getBlockState());
+                        blocks().onBlockChange(d.getPos(), d.getBlockState(), bulk);
                     }
                 });
             } else if (msg instanceof S25PacketBlockBreakAnim) {

@@ -48,6 +48,10 @@ existir, usa a **Comic Neue**, uma fonte parecida e livre que vai dentro do mod
 
 ## Checks
 
+Na aba **Checks** (no topo da GUI, ao lado de "Jogadores") dá para ligar e desligar cada check.
+Desligado = não analisa, não conta alerta e não avisa no chat. "Só confiáveis" deixa ligados só os
+que não são experimentais. A escolha fica salva.
+
 Tudo é calculado no client com o que o servidor envia (posições, rotações, animações, blocos), então
 lag pode gerar falso positivo. Use como indício para assistir o jogador, não como prova. Checks
 marcados com *(exp.)* são experimentais e só avisam no chat com a opção **Experimentais** ligada
@@ -55,21 +59,21 @@ marcados com *(exp.)* são experimentais e só avisam no chat com a opção **Ex
 
 | Check | Como detecta |
 |---|---|
-| **AutoClick** *(exp.)* | O 1.8 só repassa ~7 swings/s de outro jogador, então não dá para ver 15–20 CPS. Detecta clique **no limite 30 s seguidos sem pausa** (ignora quem está minerando ou com vara de pesca). No próprio jogador: CPS ≥ 20 ou constante demais. |
-| **AutoBlock** | Swing com a espada defendendo por 15 ticks seguidos (o client vanilla ignora o ataque enquanto o item está em uso). |
-| **AimAssist** *(exp.)* | Em combate: erro médio da mira < 3° com o alvo andando de lado; giros de 60°+ que param em cima do alvo; ou só o yaw mexendo 25+ ticks com o pitch travado. |
+| **AutoClick** *(exp.)* | O 1.8 só repassa ~7 swings/s de outro jogador, então não dá para ver 15–20 CPS. Detecta clique **no limite 30 s seguidos sem pausa** (ignora quem está minerando, colocando bloco ou com vara de pesca). No próprio jogador: CPS ≥ 20 ou constante demais. |
+| **AutoBlock** *(exp.)* | Swing com a espada defendendo por 3 s seguidos (o client vanilla ignora o ataque enquanto o item está em uso; block-hit rápido legit pode parecer contínuo por alguns ticks, por isso o tempo longo). |
+| **AimAssist** *(exp.)* | Em combate: erro médio da mira < 3° com o alvo andando de lado; giros de 60°+ que param em cima do alvo; ou só o yaw mexendo 2°+ por tick durante 2 s com o pitch travado. |
 | **Reach** | Distância do olho até a hitbox da vítima em cada hit, usando a posição **mais favorável** a ele dentro do atraso do ping. Acima de 3.25 repetidamente. |
 | **Backtrack** *(exp.)* | O hit só alcança uma posição antiga da vítima, mais antiga do que o ping dele explica. |
 | **Blink/FakeLag** | Congela (servidor para de mandar a posição) e depois "teleporta" o caminho, enquanto os outros continuam se mexendo e com ping baixo. |
-| **Velocity** | Depois de um hit corpo a corpo quase não sai do lugar (sem parede atrás) em 4+ dos últimos hits. |
-| **Speed** | Média acima de 0.40 bloco/tick por 1 s, sem partículas de poção, sem gelo/slime e sem ter tomado hit. |
-| **NoFall** | Caiu 5+ blocos sem tomar dano (só em mundos onde já se viu alguém tomar dano de queda; ignora água, teia, escada, slime, feno e bota com Peso-Pena). |
-| **NoSlow** | Anda rápido usando item, ou continua com sprint usando item (o vanilla corta o sprint). |
-| **SafeWalk** | Parado na quina com metade do corpo para fora, sem agachar, sobre um vão. |
-| **Scaffold** | Bloco embaixo olhando para frente; 11+ blocos/s; ponte rápida sem agachar; Tower rápido; ponte de **sprint** no plano olhando para baixo sobre o vazio. |
+| **Velocity** | Depois de um hit corpo a corpo claro (até 4.5 blocos, mirando nele) quase não sai do lugar, sem parede atrás e sem estar pegando fogo, em 4+ dos últimos hits. |
+| **Speed** | Média acima de 0.42 bloco/tick por 1 s, sem partículas de poção, sem gelo/slime, sem ter tomado hit, e só se no máximo 2 jogadores estão rápidos (mais que isso é o servidor dando velocidade). |
+| **NoFall** | Caiu 6+ blocos sem tomar dano, 3 vezes em 2 min (só em mundos onde já se viu alguém tomar dano de queda; ignora água, teia, escada, slime, feno e bota com Peso-Pena). |
+| **NoSlow** | Anda rápido usando item, ou continua com sprint usando item (o vanilla corta o sprint). Ignora logo depois de tomar hit. |
+| **SafeWalk** | Ficar parado na quina é normal; o que conta é **como** ele para: vinha andando e parou **seco** (soltando a tecla o jogo desacelera aos poucos) exatamente na borda, sem agachar e sem parede na frente, 3 vezes em 20 s. |
+| **Scaffold** | Bloco logo embaixo olhando para frente (pitch < 30°); 13+ blocos/s; ponte rápida sem agachar; Tower rápido sem poção; ponte de **sprint** no plano olhando para baixo sobre o vazio. |
 | **Eagle/LegitScaffold** *(exp.)* | Agacha exatamente no tick do clique 4 vezes seguidas fazendo ponte. |
 | **FastMine** *(exp.)* | Quebra o bloco com a rachadura em 70–80% (o servidor aceita a partir de 70%; legit chega a 90%+). |
-| **Nuker** | Quebra um bloco sem nenhuma face exposta (coberto por blocos inteiros, vidro incluso). |
+| **Nuker** | Quebra, 2 vezes em 30 s, um bloco sem nenhuma face exposta (coberto por blocos sólidos inteiros, vidro incluso), estando a até 6.5 blocos. Ignora pacotes com muitos blocos de uma vez (reset de mapa). |
 | **BedNuker** | Quebra uma cama coberta (BedWars). |
 | **Protocol** | Pitch impossível (> 90°). |
 
